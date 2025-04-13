@@ -1,0 +1,729 @@
+---
+title: "NEON_group_project"
+author: "AGB"
+date: "2025-04-13"
+output:
+  word_document: 
+    number_sections: true
+  pdf_document: 
+    toc: true
+    number_sections: true
+    toc_depth: 4
+  html_document: 
+    toc: true
+    toc_float: true
+    toc_depth: 4
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+setwd("~/Documents/Spring 2025/ECOL8322")
+```
+
+Plan of attack for document (Anna)
+- Going to use longleaf pine
+- Calculate standing carbon stocks for aboveground like assignment --- Completed
+- Calculate standing carbon stocks for soil like assignment --- Completed
+- Calculate standing carbon stocks for roots like assignment --- To be done
+- Need to brainstorm for nitrogen how-to --- To be done
+
+Environment
+```{r}											
+#install.packages("neonUtilities")						
+library(neonUtilities)								
+library(tidyverse)
+library(lubridate)
+```
+
+#DSNY -- Tree Carbon Stocks
+Downloading the data of interest from NEON
+```{r}												
+DSNY.trees <- loadByProduct(dpID="DP1.10098.001",
+site=c("DSNY"),
+startdate="2012-01", enddate="2024-12",
+package="basic")
+
+list2env(DSNY.trees, .GlobalEnv)
+```	
+
+Write CSVs for four tables extracted
+```{r}											
+#readme_10098
+write.csv(readme_10098, "readme_10098_DSNY.csv")
+
+#vst_perplotperyear
+write.csv(vst_perplotperyear, "vst_perplotperyear_DSNY.csv")
+
+#vst_apparentindividual
+write.csv(vst_apparentindividual, "vst_apparentindividual_DSNY.csv")
+
+#variables_10098
+write.csv(variables_10098, "variables_10098_DSNY.csv")
+```
+
+readme_10098 has a description of all the dataframes and variables_10098 defines all the variables in each dataframe. As you are working with NEON data in the future, you’ll want to familiarize yourself with these, but for the rest of this activity we will not need to refer to them.
+
+Read in one of the CSVs we wrote above and revise to be compatible with the one that holds tree measurements
+```{r}											
+vst_perplotperyear_DSNY <- read.csv("vst_perplotperyear_DSNY.csv")
+variables_10098_DSNY <- read.csv("variables_10098_DSNY.csv")
+
+#making a new dataframe with selected variables
+plot.info.vst.DSNY <- vst_perplotperyear_DSNY %>%
+select(date, domainID, siteID, plotID, plotType, nlcdClass, totalSampledAreaTrees)
+
+#making a new variable that containers only year
+plot.info.vst.DSNY <- plot.info.vst.DSNY %>%
+mutate(year= year(date))
+
+#making new dataframe where you filter only the most recent sampling year for each PLOT
+plot.info.vst.DSNY.rec <- plot.info.vst.DSNY %>%
+group_by(plotID)%>%
+filter(year==max(year))
+
+#remove NAs from the totalSampledAreaTrees variable 
+plot.info.vst.DSNY.rec <- plot.info.vst.DSNY.rec %>% filter(totalSampledAreaTrees!="NA")
+
+```
+
+Repeating the process above for individual dataframe
+```{r}											
+vst_apparentindividual_DSNY <- read.csv("vst_apparentindividual_DSNY.csv")
+
+#making a new dataframe with selected variables
+individuals.vst.DSNY <- vst_apparentindividual_DSNY %>%
+select(date, siteID, plotID, individualID, growthForm, stemDiameter, plantStatus)
+
+#making a new variable that containers only year
+individuals.vst.DSNY <- individuals.vst.DSNY %>%
+mutate(year= year(date))
+
+#making new dataframe where you filter only the most recent sampling year for each INDIVIDUAL
+most.recent.individuals.vst.DSNY <- individuals.vst.DSNY %>%
+group_by(individualID) %>%
+filter(year==max(year))
+
+#making new dataframe where you filter the prior dataframe for only live trees
+most.recent.live.plants.DSNY.vst <- most.recent.individuals.vst.DSNY %>% filter(str_detect(plantStatus, "Live")) #little unsure here
+
+#making new dataframe for single bole trees, multi-bole trees, and small trees only
+most.recent.live.trees1.DSNY <- most.recent.live.plants.DSNY.vst %>%
+  filter(growthForm=="single bole tree" | growthForm=="multi-bole tree" | growthForm=="small tree")
+
+#for dataframe above now we are excluding trees that have a recorded stem diameter of NA, we need to do this for analysis
+most.recent.live.trees.DSNY <- subset(most.recent.live.trees1.DSNY, stemDiameter>0)
+
+```
+
+Joining dataframes for DSNY
+```{r}
+
+# str(most.recent.live.trees.DSNY)
+# str(plot.info.vst.DSNY.rec)
+
+tree.data.DSNY <- left_join(most.recent.live.trees.DSNY, plot.info.vst.DSNY.rec)
+# str(tree.data.DSNY) #XX
+
+tree.data.DSNY.complete<-subset(tree.data.DSNY, totalSampledAreaTrees>0)
+# str(tree.data.DSNY.complete) #XX
+
+#We lost information for XX trees when joining dataframes together.
+
+```
+
+```{r}
+
+#need a new column in joined dataframe that represents biomass of each tree (in kg) called AGB
+#mixed hardwood allometric equation from jenkins et al 2003
+#Equation that I need to use is ABG (kg) = exp(B0 + B1 x ln(dbh))
+tree.data.DSNY.complete$AGB <- exp(-2.4800 + (2.4835*log(tree.data.DSNY.complete$stemDiameter))) #this equation gives kg
+
+#now need to create a new dataframe called AGB.trees.by.plot.DSNY
+AGB.trees.by.plot.DSNY <- tree.data.DSNY.complete %>%
+  group_by(siteID, plotID, totalSampledAreaTrees) %>% #grouping variables together
+  summarise(plot.AGB = sum(AGB)) #summing by grouping variables 
+# View(AGB.trees.by.plot.DSNY)
+
+AGB.trees.by.plot.DSNY$AGB.kg.m2<-AGB.trees.by.plot.DSNY$plot.AGB/AGB.trees.by.plot.DSNY$totalSampledAreaTrees #making it as kg/m2
+
+#Okay, need to get m2 to ha (10,000 m2 = 1 ha)
+#then to get kg to mg (1,000 kg = 1 mg)
+
+AGB.trees.by.plot.DSNY <- AGB.trees.by.plot.DSNY %>%
+  mutate(AGB.kg.m2 = plot.AGB/totalSampledAreaTrees) %>%
+  mutate(AGB.Mg.ha = (((AGB.kg.m2)*10))) %>%
+  mutate(AGB.C.Mg.ha = AGB.Mg.ha*0.47)
+# View(AGB.trees.by.plot.DSNY)
+
+
+```
+
+```{r}
+ggplot(data=AGB.trees.by.plot.DSNY, aes(x=plotID, y=AGB.C.Mg.ha)) + 
+geom_jitter()+
+theme_classic()+
+theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+
+```
+
+
+#JERC -- Tree Carbon Stocks
+Downloading the data of interest from NEON
+```{r}												
+JERC.trees <- loadByProduct(dpID="DP1.10098.001", 	
+site=c("JERC"), 		
+startdate="2012-01", enddate="2024-12", 				
+package="basic")
+
+list2env(JERC.trees, .GlobalEnv)
+```	
+
+Write CSVs for four tables extracted
+```{r}											
+#readme_10098
+write.csv(readme_10098, "readme_10098_JERC.csv")
+
+#vst_perplotperyear
+write.csv(vst_perplotperyear, "vst_perplotperyear_JERC.csv")
+
+#vst_apparentindividual
+write.csv(vst_apparentindividual, "vst_apparentindividual_JERC.csv")
+
+#variables_10098
+write.csv(variables_10098, "variables_10098_JERC.csv")
+```
+
+readme_10098 has a description of all the dataframes and variables_10098 defines all the variables in each dataframe. As you are working with NEON data in the future, you’ll want to familiarize yourself with these, but for the rest of this activity we will not need to refer to them.
+
+Read in one of the CSVs we wrote above and revise to be compatible with the one that holds tree measurements
+```{r}											
+vst_perplotperyear_JERC <- read.csv("vst_perplotperyear_JERC.csv")
+variables_10098_JERC <- read.csv("variables_10098_JERC.csv")
+
+#making a new dataframe with selected variables
+plot.info.vst.JERC <- vst_perplotperyear_JERC %>%
+select(date, domainID, siteID, plotID, plotType, nlcdClass, totalSampledAreaTrees)
+
+#making a new variable that containers only year
+plot.info.vst.JERC <- plot.info.vst.JERC %>%
+mutate(year= year(date))
+
+#making new dataframe where you filter only the most recent sampling year for each PLOT
+plot.info.vst.JERC.rec <- plot.info.vst.JERC %>%
+group_by(plotID)%>%
+filter(year==max(year))
+
+#remove NAs from the totalSampledAreaTrees variable 
+plot.info.vst.JERC.rec <- plot.info.vst.JERC.rec %>% filter(totalSampledAreaTrees!="NA")
+
+```
+
+Repeating the process above for individual dataframe
+```{r}											
+vst_apparentindividual_JERC <- read.csv("vst_apparentindividual_JERC.csv")
+
+#making a new dataframe with selected variables
+individuals.vst.JERC <- vst_apparentindividual_JERC %>%
+select(date, siteID, plotID, individualID, growthForm, stemDiameter, plantStatus)
+
+#making a new variable that containers only year
+individuals.vst.JERC <- individuals.vst.JERC %>%
+mutate(year= year(date))
+
+#making new dataframe where you filter only the most recent sampling year for each INDIVIDUAL
+most.recent.individuals.vst.JERC <- individuals.vst.JERC %>%
+group_by(individualID) %>%
+filter(year==max(year))
+
+#making new dataframe where you filter the prior dataframe for only live trees
+most.recent.live.plants.JERC.vst <- most.recent.individuals.vst.JERC %>%
+filter(str_detect(plantStatus, "Live")) #little unsure here
+
+#making new dataframe for single bole trees, multi-bole trees, and small trees only
+most.recent.live.trees1.JERC <- most.recent.live.plants.JERC.vst %>%
+  filter(growthForm=="single bole tree" | growthForm=="multi-bole tree" | growthForm=="small tree")
+
+#for dataframe above now we are excluding trees that have a recorded stem diameter of NA, we need to do this for analysis
+most.recent.live.trees.JERC <- subset(most.recent.live.trees1.JERC, stemDiameter>0)
+
+```
+
+Joining dataframes for JERC
+```{r}
+
+# str(most.recent.live.trees.JERC)
+# str(plot.info.vst.JERC.rec)
+
+tree.data.JERC <- left_join(most.recent.live.trees.JERC, plot.info.vst.JERC.rec)
+# str(tree.data.JERC) #XXX
+
+tree.data.JERC.complete<-subset(tree.data.JERC, totalSampledAreaTrees>0)
+# str(tree.data.JERC.complete) #XXX
+
+#We lost information for XXX trees when joining dataframes together.
+
+```
+
+```{r}
+
+#need a new column in joined dataframe that represents biomass of each tree (in kg) called AGB
+#mixed hardwood allometric equation from jenkins et al 2003
+#Equation that I need to use is ABG (kg) = exp(B0 + B1 x ln(dbh))
+tree.data.JERC.complete$AGB <- exp(-2.4800 + (2.4835*log(tree.data.JERC.complete$stemDiameter))) #this equation gives kg
+
+#now need to create a new dataframe called AGB.trees.by.plot.JERC
+AGB.trees.by.plot.JERC <- tree.data.JERC.complete %>%
+  group_by(siteID, plotID, totalSampledAreaTrees) %>% #grouping variables together
+  summarise(plot.AGB = sum(AGB)) #summing by grouping variables 
+View(AGB.trees.by.plot.JERC)
+
+AGB.trees.by.plot.JERC$AGB.kg.m2<-AGB.trees.by.plot.JERC$plot.AGB/AGB.trees.by.plot.JERC$totalSampledAreaTrees #making it as kg/m2
+
+#Okay, need to get m2 to ha (10,000 m2 = 1 ha)
+#then to get kg to mg (1,000 kg = 1 mg)
+
+AGB.trees.by.plot.JERC <- AGB.trees.by.plot.JERC %>%
+  mutate(AGB.kg.m2 = plot.AGB/totalSampledAreaTrees) %>%
+  mutate(AGB.Mg.ha = (((AGB.kg.m2)*10))) %>%
+  mutate(AGB.C.Mg.ha = AGB.Mg.ha*0.47)
+# View(AGB.trees.by.plot.JERC)
+
+```
+
+```{r}
+ggplot(data=AGB.trees.by.plot.JERC, aes(x=plotID, y=AGB.C.Mg.ha)) + 
+geom_jitter()+
+theme_classic()+
+theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+
+```
+
+#OSBS -- Tree Carbon Stocks
+Downloading the data of interest from NEON
+```{r}												
+OSBS.trees <- loadByProduct(dpID="DP1.10098.001", 	
+site=c("OSBS"), 		
+startdate="2012-01", enddate="2024-12", 				
+package="basic")
+
+list2env(OSBS.trees, .GlobalEnv)
+```	
+
+Write CSVs for four tables extracted
+```{r}											
+#readme_10098
+write.csv(readme_10098, "readme_10098_OSBS.csv")
+
+#vst_perplotperyear
+write.csv(vst_perplotperyear, "vst_perplotperyear_OSBS.csv")
+
+#vst_apparentindividual
+ write.csv(vst_apparentindividual, "vst_apparentindividual_OSBS.csv")
+
+#variables_10098
+write.csv(variables_10098, "variables_10098_OSBS.csv")
+```
+
+readme_10098 has a description of all the dataframes and variables_10098 defines all the variables in each dataframe. As you are working with NEON data in the future, you’ll want to familiarize yourself with these, but for the rest of this activity we will not need to refer to them.
+
+Read in one of the CSVs we wrote above and revise to be compatible with the one that holds tree measurements
+```{r}											
+vst_perplotperyear_OSBS <- read.csv("vst_perplotperyear_OSBS.csv")
+variables_10098_OSBS <- read.csv("variables_10098_OSBS.csv")
+
+#making a new dataframe with selected variables
+plot.info.vst.OSBS <- vst_perplotperyear_OSBS %>%
+select(date, domainID, siteID, plotID, plotType, nlcdClass, totalSampledAreaTrees)
+
+#making a new variable that containers only year
+plot.info.vst.OSBS <- plot.info.vst.OSBS %>%
+mutate(year= year(date))
+
+#making new dataframe where you filter only the most recent sampling year for each PLOT
+plot.info.vst.OSBS.rec <- plot.info.vst.OSBS %>%
+group_by(plotID)%>%
+filter(year==max(year))
+
+#remove NAs from the totalSampledAreaTrees variable 
+plot.info.vst.OSBS.rec <- plot.info.vst.OSBS.rec %>% filter(totalSampledAreaTrees!="NA")
+
+```
+
+Repeating the process above for individual dataframe
+```{r}											
+vst_apparentindividual_OSBS <- read.csv("vst_apparentindividual_OSBS.csv")
+
+#making a new dataframe with selected variables
+individuals.vst.OSBS <- vst_apparentindividual_OSBS %>%
+select(date, siteID, plotID, individualID, growthForm, stemDiameter, plantStatus)
+
+#making a new variable that containers only year
+individuals.vst.OSBS <- individuals.vst.OSBS %>%
+mutate(year= year(date))
+
+#making new dataframe where you filter only the most recent sampling year for each INDIVIDUAL
+most.recent.individuals.vst.OSBS <- individuals.vst.OSBS %>%
+group_by(individualID) %>%
+filter(year==max(year))
+
+#making new dataframe where you filter the prior dataframe for only live trees
+most.recent.live.plants.OSBS.vst <- most.recent.individuals.vst.OSBS %>%
+filter(str_detect(plantStatus, "Live")) #little unsure here
+
+#making new dataframe for single bole trees, multi-bole trees, and small trees only
+most.recent.live.trees1.OSBS <- most.recent.live.plants.OSBS.vst %>%
+  filter(growthForm=="single bole tree" | growthForm=="multi-bole tree" | growthForm=="small tree")
+
+#for dataframe above now we are excluding trees that have a recorded stem diameter of NA, we need to do this for analysis
+most.recent.live.trees.OSBS <- subset(most.recent.live.trees1.OSBS, stemDiameter>0)
+
+```
+
+Joining dataframes for OSBS
+```{r}
+
+# str(most.recent.live.trees.OSBS)
+# str(plot.info.vst.OSBS.rec)
+
+tree.data.OSBS <- left_join(most.recent.live.trees.OSBS, plot.info.vst.OSBS.rec)
+# str(tree.data.OSBS) #XXX
+
+tree.data.OSBS.complete<-subset(tree.data.OSBS, totalSampledAreaTrees>0)
+# str(tree.data.OSBS.complete) #XXX
+
+#We lost information for XXX trees when joining dataframes together.
+
+```
+
+```{r}
+
+#need a new column in joined dataframe that represents biomass of each tree (in kg) called AGB
+#mixed hardwood allometric equation from jenkins et al 2003
+#Equation that I need to use is ABG (kg) = exp(B0 + B1 x ln(dbh))
+tree.data.OSBS.complete$AGB <- exp(-2.4800 + (2.4835*log(tree.data.OSBS.complete$stemDiameter))) #this equation gives kg
+
+#now need to create a new dataframe called AGB.trees.by.plot.OSBS
+AGB.trees.by.plot.OSBS <- tree.data.OSBS.complete %>%
+  group_by(siteID, plotID, totalSampledAreaTrees) %>% #grouping variables together
+  summarise(plot.AGB = sum(AGB)) #summing by grouping variables 
+# View(AGB.trees.by.plot.OSBS)
+
+AGB.trees.by.plot.OSBS$AGB.kg.m2<-AGB.trees.by.plot.OSBS$plot.AGB/AGB.trees.by.plot.OSBS$totalSampledAreaTrees #making it as kg/m2
+
+#Okay, need to get m2 to ha (10,000 m2 = 1 ha)
+#then to get kg to mg (1,000 kg = 1 mg)
+
+AGB.trees.by.plot.OSBS <- AGB.trees.by.plot.OSBS %>%
+  mutate(AGB.kg.m2 = plot.AGB/totalSampledAreaTrees) %>%
+  mutate(AGB.Mg.ha = (((AGB.kg.m2)*10))) %>%
+  mutate(AGB.C.Mg.ha = AGB.Mg.ha*0.47)
+# View(AGB.trees.by.plot.OSBS)
+
+```
+
+```{r}
+ggplot(data=AGB.trees.by.plot.OSBS, aes(x=plotID, y=AGB.C.Mg.ha)) + 
+geom_jitter()+
+theme_classic()+
+theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+
+```
+
+
+
+#Joining dataframes across D03 (Southeastern longleaf pine forests) for Tree Carbon Stocks
+```{r}
+
+# str(AGB.trees.by.plot.DSNY) #XX
+# str(AGB.trees.by.plot.JERC) #XX
+# str(AGB.trees.by.plot.OSBS) #XX
+
+AGB.trees.by.plot.D03 <- full_join(AGB.trees.by.plot.DSNY, AGB.trees.by.plot.JERC)
+AGB.trees.by.plot.D03 <- full_join(AGB.trees.by.plot.D03, AGB.trees.by.plot.OSBS)
+#str(AGB.trees.by.plot.D03)
+```
+
+#Visualizing Tree Carbon Stocks by site of D03
+```{r}
+
+AGB.trees.by.plot.D03.summarise <- AGB.trees.by.plot.D03 %>%
+ group_by(siteID) %>%
+ summarise(AGB.C.Mg.ha_siteAverage = mean(AGB.C.Mg.ha),
+           AGB.C.Mg.ha_siteSD = sd(AGB.C.Mg.ha))
+ 
+ggplot(data=AGB.trees.by.plot.D03, aes(x=siteID, y=AGB.C.Mg.ha, group = siteID, color=siteID)) + 
+  geom_point(size=1.5, alpha = 0.3, position = position_jitterdodge(dodge.width = 0.5))  +
+  geom_point(data = AGB.trees.by.plot.D03.summarise, aes(x = siteID, y = AGB.C.Mg.ha_siteAverage, group = siteID, color=siteID), size = 3.5, alpha = 0.8, position = position_dodge(width = 0.5)) +
+  geom_errorbar(data = AGB.trees.by.plot.D03.summarise, aes(x= siteID, y = AGB.C.Mg.ha_siteAverage, ymin = (AGB.C.Mg.ha_siteAverage-AGB.C.Mg.ha_siteSD), ymax = (AGB.C.Mg.ha_siteAverage+AGB.C.Mg.ha_siteSD), colour = siteID), width = 0.2) +
+        scale_color_brewer(name = "SiteID", palette = "Dark2") + #color-blind friendly
+        ggtitle("Tree Carbon Stocks by Site of D03") +
+        ylab("Carbon Stock (Mg/ha)") +
+        theme_classic(base_size = 16) +
+        theme(plot.title = element_text(size=16, hjust = 0.5),
+              axis.text.x=element_text(size=12, color = "black"),
+              axis.text.y=element_text(size=12),
+              axis.title.y=element_text(size=14), 
+              axis.title.x=element_blank(), 
+              legend.text=element_text(size=14),
+              legend.title=element_text(size=14),
+              legend.position = "none") 
+
+```
+
+
+#DSNY -- Root Carbon Stocks
+Create a chunk where you extract root biomass using NEON utilies package, get into environment, and write csvs into the environment
+```{r}
+
+DSNY.roots <- loadByProduct(dpID="DP1.10067.001", 	
+site=c("DSNY"), 		
+startdate="2012-01", enddate="2024-12", 				
+package="basic")
+
+list2env(DSNY.roots, .GlobalEnv)
+
+#readme_10067
+write.csv(readme_10067, "readme_10067_DSNY.csv")
+
+#bbc_percore
+write.csv(bbc_percore, "bbc_percore_DSNY.csv")
+
+#bbc_rootmass
+write.csv(bbc_rootmass, "bbc_rootmass_DSNY.csv")
+
+#variables_10067
+write.csv(variables_10067, "variables_10067_DSNY.csv")
+
+```
+
+Create chunk selecting variables to create new dfs
+```{r}
+
+bbc_rootmass_DSNY <- read.csv("bbc_rootmass_DSNY.csv")
+bbc_percore_DSNY <- read.csv("bbc_percore_DSNY.csv")
+
+root.mass.DSNY <- bbc_rootmass_DSNY %>%
+select(domainID, plotID, sampleID, subsampleID, collectDate, sizeCategory, rootStatus, dryMass)
+
+root.core.DSNY <- bbc_percore_DSNY %>%
+ select(domainID, plotID, subplotID, sampleID, clipID, coreID, collectDate, rootSampleArea, rootSampleDepth, coreDiameter)
+
+
+root.data.DSNY <- left_join(root.mass.DSNY, root.core.DSNY)
+
+root.data.DSNY$year <- substr(root.data.DSNY$collectDate, start=1, stop=4) 
+
+```
+
+Root calculations and conversions
+```{r}
+
+roots.by.sample.DSNY <- root.data.DSNY %>% 
+  group_by(plotID, sampleID, rootSampleArea, rootSampleDepth) %>%
+  summarise(total.mass = sum(dryMass))
+
+roots.by.sample.DSNY.final <- roots.by.sample.DSNY %>%
+  mutate(root.gC.sample = (total.mass * 0.47)) %>%
+  mutate(root.gC.m2 = (root.gC.sample/rootSampleArea)) %>%
+  mutate(root.MgC.ha = (root.gC.m2 * 0.01))
+ 
+roots.by.plot.DSNY <- roots.by.sample.DSNY.final %>% 
+  group_by(plotID) %>%
+  summarise(mean.root.MgC.ha = mean(root.MgC.ha))
+
+```
+
+Visualize the data
+```{r}
+
+ggplot(data=roots.by.plot.DSNY, aes(x=plotID, y=mean.root.MgC.ha)) + 
+geom_jitter()+
+theme_classic()+
+theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+
+```
+
+#JERC -- Root Carbon Stocks
+Create a chunk where you extract root biomass using NEON utilies package, get into environment, and write csvs into the environment
+```{r}
+
+JERC.roots <- loadByProduct(dpID="DP1.10067.001",
+site=c("JERC"),
+startdate="2012-01", enddate="2024-12",
+package="basic")
+
+list2env(JERC.roots, .GlobalEnv)
+
+#readme_10067
+write.csv(readme_10067, "readme_10067_JERC.csv")
+
+#bbc_percore
+write.csv(bbc_percore, "bbc_percore_JERC.csv")
+
+#bbc_rootmass
+write.csv(bbc_rootmass, "bbc_rootmass_JERC.csv")
+
+#variables_10067
+write.csv(variables_10067, "variables_10067_JERC.csv")
+
+```
+
+Create chunk selecting variables to create new dfs
+```{r}
+
+bbc_rootmass_JERC <- read.csv("bbc_rootmass_JERC.csv")
+bbc_percore_JERC <- read.csv("bbc_percore_JERC.csv")
+
+root.mass.JERC <- bbc_rootmass_JERC %>%
+select(domainID, plotID, sampleID, subsampleID, collectDate, sizeCategory, rootStatus, dryMass)
+
+root.core.JERC <- bbc_percore_JERC %>%
+ select(domainID, plotID, subplotID, sampleID, clipID, coreID, collectDate, rootSampleArea, rootSampleDepth, coreDiameter)
+
+
+root.data.JERC <- left_join(root.mass.JERC, root.core.JERC)
+
+root.data.JERC$year <- substr(root.data.JERC$collectDate, start=1, stop=4) 
+
+```
+
+Root calculations and conversions
+```{r}
+
+roots.by.sample.JERC <- root.data.JERC %>% 
+  group_by(plotID, sampleID, rootSampleArea, rootSampleDepth) %>%
+  summarise(total.mass = sum(dryMass))
+
+roots.by.sample.JERC.final <- roots.by.sample.JERC %>%
+  mutate(root.gC.sample = (total.mass * 0.47)) %>%
+  mutate(root.gC.m2 = (root.gC.sample/rootSampleArea)) %>%
+  mutate(root.MgC.ha = (root.gC.m2 * 0.01))
+ 
+roots.by.plot.JERC <- roots.by.sample.JERC.final %>% 
+  group_by(plotID) %>%
+  summarise(mean.root.MgC.ha = mean(root.MgC.ha))
+
+```
+
+Visualize the data
+```{r}
+
+ggplot(data=roots.by.plot.JERC, aes(x=plotID, y=mean.root.MgC.ha)) + 
+geom_jitter()+
+theme_classic()+
+theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+
+```
+
+#OSBS -- Root Carbon Stocks
+Create a chunk where you extract root biomass using NEON utilies package, get into environment, and write csvs into the environment
+```{r}
+
+OSBS.roots <- loadByProduct(dpID="DP1.10067.001", 	
+site=c("OSBS"), 		
+startdate="2012-01", enddate="2024-12", 				
+package="basic")
+
+ list2env(OSBS.roots, .GlobalEnv)
+
+#readme_10067
+write.csv(readme_10067, "readme_10067_OSBS.csv")
+
+#bbc_percore
+write.csv(bbc_percore, "bbc_percore_OSBS.csv")
+
+#bbc_rootmass
+write.csv(bbc_rootmass, "bbc_rootmass_OSBS.csv")
+
+#variables_10067
+write.csv(variables_10067, "variables_10067_OSBS.csv")
+
+```
+
+Create chunk selecting variables to create new dfs
+```{r}
+
+bbc_rootmass_OSBS <- read.csv("bbc_rootmass_OSBS.csv")
+bbc_percore_OSBS <- read.csv("bbc_percore_OSBS.csv")
+
+root.mass.OSBS <- bbc_rootmass_OSBS %>%
+select(domainID, plotID, sampleID, subsampleID, collectDate, sizeCategory, rootStatus, dryMass)
+
+root.core.OSBS <- bbc_percore_OSBS %>%
+ select(domainID, plotID, subplotID, sampleID, clipID, coreID, collectDate, rootSampleArea, rootSampleDepth, coreDiameter)
+
+
+root.data.OSBS <- left_join(root.mass.OSBS, root.core.OSBS)
+
+root.data.OSBS$year <- substr(root.data.OSBS$collectDate, start=1, stop=4) 
+
+```
+
+Root calculations and conversions
+```{r}
+
+roots.by.sample.OSBS <- root.data.OSBS %>% 
+  group_by(plotID, sampleID, rootSampleArea, rootSampleDepth) %>%
+  summarise(total.mass = sum(dryMass))
+
+roots.by.sample.OSBS.final <- roots.by.sample.OSBS %>%
+  mutate(root.gC.sample = (total.mass * 0.47)) %>%
+  mutate(root.gC.m2 = (root.gC.sample/rootSampleArea)) %>%
+  mutate(root.MgC.ha = (root.gC.m2 * 0.01))
+ 
+roots.by.plot.OSBS <- roots.by.sample.OSBS.final %>% 
+  group_by(plotID) %>%
+  summarise(mean.root.MgC.ha = mean(root.MgC.ha))
+
+```
+
+Visualize the data
+```{r}
+
+ggplot(data=roots.by.plot.OSBS, aes(x=plotID, y=mean.root.MgC.ha)) + 
+geom_jitter()+
+theme_classic()+
+theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+
+```
+
+#Joining dataframes across D03 (Southeastern longleaf pine forests) for Tree Carbon Stocks
+```{r}
+
+# str(roots.by.plot.DSNY) #30
+# str(roots.by.plot.JERC) #20
+# str(roots.by.plot.OSBS) #20
+
+roots.by.plot.D03 <- full_join(roots.by.plot.DSNY, roots.by.plot.JERC)
+roots.by.plot.D03 <- full_join(roots.by.plot.D03, roots.by.plot.OSBS)
+#str(roots.by.plot.D03)
+```
+
+#Visualizing Tree Carbon Stocks by site of D03
+```{r}
+
+roots.by.plot.D03$siteID <- str_sub(roots.by.plot.D03$plotID, 1, 4)
+
+roots.by.plot.D03.summarise <- roots.by.plot.D03 %>%
+ group_by(siteID) %>%
+ summarise(mean.root.MgC.ha_siteAverage = mean(mean.root.MgC.ha),
+           mean.root.MgC.ha_siteSD = sd(mean.root.MgC.ha)) 
+ 
+ggplot(data=roots.by.plot.D03, aes(x=siteID, y=mean.root.MgC.ha, group = siteID, color=siteID)) + 
+  geom_point(size=1.5, alpha = 0.3, position = position_jitterdodge(dodge.width = 0.5))  +
+  geom_point(data = roots.by.plot.D03.summarise, aes(x = siteID, y = mean.root.MgC.ha_siteAverage, group = siteID, color=siteID), size = 3.5, alpha = 0.8, position = position_dodge(width = 0.5)) +
+  geom_errorbar(data = roots.by.plot.D03.summarise, aes(x= siteID, y = mean.root.MgC.ha_siteAverage, ymin = (mean.root.MgC.ha_siteAverage-mean.root.MgC.ha_siteSD), ymax = (mean.root.MgC.ha_siteAverage+mean.root.MgC.ha_siteSD), colour = siteID), width = 0.2) +
+        scale_color_brewer(name = "SiteID", palette = "Dark2") + #color-blind friendly
+        ggtitle("Root Carbon Stocks by Site of D03") +
+        ylab("Carbon Stock (Mg/ha)") +
+        theme_classic(base_size = 16) +
+        theme(plot.title = element_text(size=16, hjust = 0.5),
+              axis.text.x=element_text(size=12, color = "black"),
+              axis.text.y=element_text(size=12),
+              axis.title.y=element_text(size=14), 
+              axis.title.x=element_blank(), 
+              legend.text=element_text(size=14),
+              legend.title=element_text(size=14),
+              legend.position = "none") 
+
+```
