@@ -1,0 +1,150 @@
+---
+title: "04.16.25_Bushong_NEON_group_project_Nitrogen"
+author: "AGB"
+date: "2025-04-16"
+output: html_document
+---
+
+Set working directory
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+setwd("~/Documents/Spring 2025/ECOL8322")
+```
+
+Environment
+```{r}											
+#install.packages("neonUtilities")						
+library(neonUtilities)								
+library(tidyverse)
+library(lubridate)
+library(dplyr)
+library(ggplot2)
+library(ggbreak)
+library(patchwork)
+
+#Necessary packages / commands for installling neonNTrans. Follow directions to update packages as needed. You can try to call for compilation for packages, but use binary if needed.
+#library(devtools) 
+#install_github("NEONScience/NEON-Nitrogen-Transformations/neonNTrans", #dependencies=TRUE)  
+#library(neonNTrans) 
+
+```
+
+Downloading the data of interest from NEON, listing, and csvs
+```{r}												
+
+#Commented out code is relevant if you are able to use neonNTrans package in your R version, which I (Anna) cannot
+      # DSNY.soil.nitro <- loadByProduct(dpID="DP1.10086.001", 	
+      # site=c("DSNY","JERC","OSBS"), 		
+      # startdate="2012-01", enddate="2024-12", 				
+      # package="basic")
+      
+      #list2env(DSNY.soil.nitro, .GlobalEnv)
+      
+      #spc_biogeochem
+      #write.csv(spc_biogeochem, "spc_biogeochem.csv")
+      
+      #spc_bulkdensity
+      #write.csv(spc_bulkdensity, "spc_bulkdensity.csv")
+      
+      
+      # test.out <- def.calc.ntrans(kclInt = DSNY.soil.nitro$ntr_internalLab, kclIntBlank = DSNY.soil.nitro$ntr_internalLabBlanks, kclExt = DSNY.soil.nitro$ntr_externalLab, soilMoist = DSNY.soil.nitro$sls_soilMoisture, dropConditions = c("extract stored at incorrect temperature", "soil stored at incorrect temperature", "mass uncertain", "volume uncertain"))
+
+
+data.summary.D03 <- read.csv("datasummary.D03.csv")
+str(data.summary.D03)
+
+```
+
+
+Notably, the Inorganic nitrogen metric provided through the neonNTrans package includes nitrite, which we are not as interested in, but some micorbes being able to utilize it as an intermediate. We could not a clearly identifiable way to isolate nitrate from nitrite with the available data.
+```{r}
+
+# Creating variable for siteID as an independent variable in the dataframe
+data.summary.D03$siteID = substr(data.summary.D03$sampleID, 1,4)
+
+# Initial visualization of data for Inorganic N
+data.summary.D03.Exploratory <- data.summary.D03 %>%
+ group_by(siteID) %>%
+ summarise(soilInorganicNugPerGram_average = mean(soilInorganicNugPerGram),
+           soilInorganicNugPerGram_sd = sd(soilInorganicNugPerGram))
+
+exploratory.InorgN.D03 <- ggplot(data=data.summary.D03, aes(x=siteID, y=soilInorganicNugPerGram, group = siteID, color=siteID)) + 
+  geom_point(size=1.5, alpha = 0.3, position = position_jitterdodge(dodge.width = 0.5))  +
+  geom_point(data = data.summary.D03.Exploratory, aes(x = siteID, y = soilInorganicNugPerGram_average, group = siteID, color=siteID), size = 3.5, alpha = 0.8, position = position_dodge(width = 0.5)) +
+  geom_errorbar(data = data.summary.D03.Exploratory, aes(x= siteID, y = soilInorganicNugPerGram_average, ymin = (soilInorganicNugPerGram_average-soilInorganicNugPerGram_sd), ymax = (soilInorganicNugPerGram_average+soilInorganicNugPerGram_sd), colour = siteID), width = 0.2) +
+        scale_color_brewer(name = "SiteID", palette = "Dark2") + #color-blind friendly
+        ggtitle("Average Soil Inorganic N by Site of D03") +
+       scale_y_continuous(breaks = seq(0, 100, 10), limits = c(-15, 100)) +
+        ylab("Inorganic N (mcg/g)") +
+        theme_classic(base_size = 16) +
+        theme(plot.title = element_text(size=16, hjust = 0.5),
+              axis.text.x=element_text(size=12, color = "black"),
+              axis.text.y=element_text(size=12),
+              axis.title.y=element_text(size=14), 
+              axis.title.x=element_blank(), 
+              legend.text=element_text(size=14),
+              legend.title=element_text(size=14),
+              legend.position = "none")
+
+# Initial visualization of data for Ammonium
+data.summary.D03.Exploratory.NH4 <- data.summary.D03 %>%
+ group_by(siteID) %>%
+ summarise(soilAmmoniumNugPerGram_average = mean(soilAmmoniumNugPerGram),
+           soilAmmoniumNugPerGram_sd = sd(soilAmmoniumNugPerGram))
+
+exploratory.ammonium.D03 <- ggplot(data=data.summary.D03, aes(x=siteID, y=soilAmmoniumNugPerGram, group = siteID, color=siteID)) + 
+  geom_point(size=1.5, alpha = 0.3, position = position_jitterdodge(dodge.width = 0.5))  +
+  geom_point(data = data.summary.D03.Exploratory.NH4, aes(x = siteID, y = soilAmmoniumNugPerGram_average, group = siteID, color=siteID), size = 3.5, alpha = 0.8, position = position_dodge(width = 0.5)) +
+  geom_errorbar(data = data.summary.D03.Exploratory.NH4, aes(x= siteID, y = soilAmmoniumNugPerGram_average, ymin = (soilAmmoniumNugPerGram_average-soilAmmoniumNugPerGram_sd), ymax = (soilAmmoniumNugPerGram_average+soilAmmoniumNugPerGram_sd), colour = siteID), width = 0.2) +
+        scale_color_brewer(name = "SiteID", palette = "Dark2") + #color-blind friendly
+        ggtitle("Average Soil Ammonium by Site of D03") +
+       scale_y_continuous(breaks = seq(-10, 80, 10), limits = c(-10, 65)) +
+      scale_y_break(c(32, 48)) +
+        ylab("Ammonium (mcg/g)") +
+        theme_classic(base_size = 16) +
+        theme(plot.title = element_text(size=16, hjust = 0.5),
+              axis.text.x=element_text(size=12, color = "black"),
+              axis.text.y=element_text(size=12),
+              axis.title.y=element_text(size=14), 
+              axis.title.x=element_blank(), 
+              axis.text.y.right = element_blank(), #deals with weird ggbreak glitch
+              axis.line.y.right = element_blank(), #deals with weird ggbreak glitch
+              axis.ticks.y.right = element_blank(), #deals with weird ggbreak glitch
+              legend.text=element_text(size=14),
+              legend.title=element_text(size=14),
+              legend.position = "none")
+
+exploratory.InorgN.D03
+exploratory.ammonium.D03
+
+# Initial visualization of data for Mineralization
+data.summary.D03.Exploratory.Mineralization <- data.summary.D03 %>%
+ group_by(siteID) %>%
+ summarise(netNminugPerGramPerDay_average = mean(netNminugPerGramPerDay), #averaging a rate, always messes with my head if appropriately statistically
+           netNminugPerGramPerDay_sd = sd(netNminugPerGramPerDay))
+
+exploratory.mineralization.D03 <- ggplot(data=data.summary.D03, aes(x=siteID, y=netNminugPerGramPerDay, group = siteID, color=siteID)) + 
+  geom_point(size=1.5, alpha = 0.3, position = position_jitterdodge(dodge.width = 0.5))  +
+  geom_point(data = data.summary.D03.Exploratory.Mineralization, aes(x = siteID, y = netNminugPerGramPerDay_average, group = siteID, color=siteID), size = 3.5, alpha = 0.8, position = position_dodge(width = 0.5)) +
+  geom_errorbar(data = data.summary.D03.Exploratory.Mineralization, aes(x= siteID, y = netNminugPerGramPerDay_average, ymin = (netNminugPerGramPerDay_average-netNminugPerGramPerDay_sd), ymax = (netNminugPerGramPerDay_average+netNminugPerGramPerDay_sd), colour = siteID), width = 0.2) +
+        scale_color_brewer(name = "SiteID", palette = "Dark2") + #color-blind friendly
+        ggtitle("Average Soil N Mineralization rate by Site of D03") +
+       #scale_y_continuous(breaks = seq(-10, 80, 10), limits = c(-10, 65)) +
+     # scale_y_break(c(32, 48)) +
+        ylab("Mineralization ((mcg/g)/day)") +
+        theme_classic(base_size = 16) +
+        theme(plot.title = element_text(size=16, hjust = 0.5),
+              axis.text.x=element_text(size=12, color = "black"),
+              axis.text.y=element_text(size=12),
+              axis.title.y=element_text(size=14), 
+              axis.title.x=element_blank(), 
+             #axis.text.y.right = element_blank(), #deals with weird ggbreak glitch
+              #axis.line.y.right = element_blank(), #deals with weird ggbreak glitch
+              #axis.ticks.y.right = element_blank(), #deals with weird ggbreak glitch
+              legend.text=element_text(size=14),
+              legend.title=element_text(size=14),
+              legend.position = "none")
+
+exploratory.mineralization.D03 #note, getting a missing values warning
+```
+
