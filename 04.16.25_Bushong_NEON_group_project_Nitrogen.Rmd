@@ -53,14 +53,69 @@ Downloading the data of interest from NEON, listing, and csvs
 data.summary.D03 <- read.csv("datasummary.D03.csv")
 str(data.summary.D03)
 
+
+# Creating variable for siteID aand soil horizon s an independent variable in the dataframe by duplicating sample ID, subsetting the string, separating by the hyphen, and adding back to the original dataframe
+data.summary.D03$siteID = substr(data.summary.D03$sampleID, 1,4)
+data.summary.D03$siteID_tosplit = substr(data.summary.D03$sampleID, 1,10)
+hold.name <- strsplit(data.summary.D03$siteID_tosplit, split="-")
+hold.name.df <- as.data.frame(matrix(unlist(hold.name), ncol=2, byrow=T))
+colnames(hold.name.df) <- c("plotID", "soilHorizon")
+data.summary.D03$plotID <- hold.name.df$plotID
+data.summary.D03$soilHorizon <- hold.name.df$soilHorizon
+
 ```
 
 
 Notably, the Inorganic nitrogen metric provided through the neonNTrans package includes nitrite, which we are not as interested in, but some micorbes being able to utilize it as an intermediate. We could not a clearly identifiable way to isolate nitrate from nitrite with the available data.
-```{r}
 
-# Creating variable for siteID as an independent variable in the dataframe
-data.summary.D03$siteID = substr(data.summary.D03$sampleID, 1,4)
+
+# Figures at the plot-level by site
+```{r}
+data.summary.D03.DSNY <- data.summary.D03 %>%
+  filter(siteID == "DSNY")
+data.summary.D03.JERC <- data.summary.D03 %>%
+  filter(siteID == "JERC")
+data.summary.D03.OSBS <- data.summary.D03 %>%
+  filter(siteID == "OSBS")
+
+exploratory.InorgN.DSNY.plot <- ggplot(data=data.summary.D03.DSNY, aes(x=plotID, y=soilInorganicNugPerGram)) + 
+  geom_point(size=1.5, alpha = 1)  +
+        #scale_color_brewer(name = "SiteID", palette = "Dark2") + #color-blind friendly
+        ggtitle("Average Soil Inorganic N by Plot within DSNY of D03") +
+       #scale_y_continuous(breaks = seq(0, 100, 10), limits = c(-15, 100)) +
+        ylab("Inorganic N (mcg/g)") +
+     geom_jitter() +
+    theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+exploratory.InorgN.DSNY.plot
+
+exploratory.InorgN.JERC.plot <- ggplot(data=data.summary.D03.JERC, aes(x=plotID, y=soilInorganicNugPerGram)) + 
+  geom_point(size=1.5, alpha = 1)  +
+        #scale_color_brewer(name = "SiteID", palette = "Dark2") + #color-blind friendly
+        ggtitle("Average Soil Inorganic N by Plot within JERC of D03") +
+       #scale_y_continuous(breaks = seq(0, 100, 10), limits = c(-15, 100)) +
+        ylab("Inorganic N (mcg/g)") +
+     geom_jitter() +
+    theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+exploratory.InorgN.JERC.plot
+
+exploratory.InorgN.OSBSplot <- ggplot(data=data.summary.D03.OSBS, aes(x=plotID, y=soilInorganicNugPerGram)) + 
+  geom_point(size=1.5, alpha = 1)  +
+        #scale_color_brewer(name = "SiteID", palette = "Dark2") + #color-blind friendly
+        ggtitle("Average Soil Inorganic N by Plot within OSBS of D03") +
+       #scale_y_continuous(breaks = seq(0, 100, 10), limits = c(-15, 100)) +
+        ylab("Inorganic N (mcg/g)") +
+     geom_jitter() +
+    theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+exploratory.InorgN.OSBSplot
+
+
+```
+
+# Figures at the site-level
+```{r}
 
 # Initial visualization of data for Inorganic N
 data.summary.D03.Exploratory <- data.summary.D03 %>%
