@@ -1,0 +1,293 @@
+---
+title: "04.16.25_Bushong_NEON_group_project_Nitrogen"
+author: "AGB"
+date: "2025-04-20"
+output: html_document
+---
+
+Set working directory
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+setwd("~/Documents/Spring 2025/ECOL8322")
+```
+
+Environment
+```{r}											
+#install.packages("neonUtilities")						
+library(neonUtilities)								
+library(tidyverse)
+library(lubridate)
+library(dplyr)
+library(ggplot2)
+library(ggbreak)
+library(patchwork)
+
+#Necessary packages / commands for installling neonNTrans. Follow directions to update packages as needed. You can try to call for compilation for packages, but use binary if needed.
+#library(devtools) 
+#install_github("NEONScience/NEON-Nitrogen-Transformations/neonNTrans", #dependencies=TRUE)  
+#library(neonNTrans) 
+
+```
+
+Downloading the data of interest from NEON, listing, and csvs
+```{r}												
+
+#Commented out code is relevant if you are able to use neonNTrans package in your R version, which I (Anna) cannot
+      # DSNY.soil.nitro <- loadByProduct(dpID="DP1.10086.001", 	
+      # site=c("DSNY","JERC","OSBS"), 		
+      # startdate="2012-01", enddate="2024-12", 				
+      # package="basic")
+      
+      #list2env(DSNY.soil.nitro, .GlobalEnv)
+      
+      #spc_biogeochem
+      #write.csv(spc_biogeochem, "spc_biogeochem.csv")
+      
+      #spc_bulkdensity
+      #write.csv(spc_bulkdensity, "spc_bulkdensity.csv")
+      
+      
+      # test.out <- def.calc.ntrans(kclInt = DSNY.soil.nitro$ntr_internalLab, kclIntBlank = DSNY.soil.nitro$ntr_internalLabBlanks, kclExt = DSNY.soil.nitro$ntr_externalLab, soilMoist = DSNY.soil.nitro$sls_soilMoisture, dropConditions = c("extract stored at incorrect temperature", "soil stored at incorrect temperature", "mass uncertain", "volume uncertain"))
+
+
+data.summary.D03 <- read.csv("datasummary.D03.csv")
+str(data.summary.D03)
+
+
+# Creating variable for siteID aand soil horizon s an independent variable in the dataframe by duplicating sample ID, subsetting the string, separating by the hyphen, and adding back to the original dataframe
+data.summary.D03$siteID = substr(data.summary.D03$sampleID, 1,4)
+data.summary.D03$siteID_tosplit = substr(data.summary.D03$sampleID, 1,10)
+hold.name <- strsplit(data.summary.D03$siteID_tosplit, split="-")
+hold.name.df <- as.data.frame(matrix(unlist(hold.name), ncol=2, byrow=T))
+colnames(hold.name.df) <- c("plotID", "soilHorizon")
+data.summary.D03$plotID <- hold.name.df$plotID
+data.summary.D03$soilHorizon <- hold.name.df$soilHorizon
+
+write.csv(data.summary.D03, "data.summary.D03_outputV2.csv")
+
+```
+
+
+Notably, the Inorganic nitrogen metric provided through the neonNTrans package includes nitrite, which we are not as interested in, but some micorbes being able to utilize it as an intermediate. We could not a clearly identifiable way to isolate nitrate from nitrite with the available data.
+
+
+# Figures at the plot-level by site
+```{r}
+data.summary.D03.DSNY <- data.summary.D03 %>%
+  filter(siteID == "DSNY")
+data.summary.D03.JERC <- data.summary.D03 %>%
+  filter(siteID == "JERC")
+data.summary.D03.OSBS <- data.summary.D03 %>%
+  filter(siteID == "OSBS")
+
+exploratory.InorgN.DSNY.plot <- ggplot(data=data.summary.D03.DSNY, aes(x=plotID, y=soilInorganicNugPerGram)) + 
+  geom_point(size=1.5, alpha = 1)  +
+        #scale_color_brewer(name = "SiteID", palette = "Dark2") + #color-blind friendly
+        ggtitle("Average Soil Inorganic N by Plot within DSNY of D03") +
+       #scale_y_continuous(breaks = seq(0, 100, 10), limits = c(-15, 100)) +
+        ylab("Inorganic N (mcg/g)") +
+     geom_jitter() +
+    theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+exploratory.InorgN.DSNY.plot
+
+exploratory.InorgN.JERC.plot <- ggplot(data=data.summary.D03.JERC, aes(x=plotID, y=soilInorganicNugPerGram)) + 
+  geom_point(size=1.5, alpha = 1)  +
+        #scale_color_brewer(name = "SiteID", palette = "Dark2") + #color-blind friendly
+        ggtitle("Average Soil Inorganic N by Plot within JERC of D03") +
+       #scale_y_continuous(breaks = seq(0, 100, 10), limits = c(-15, 100)) +
+        ylab("Inorganic N (mcg/g)") +
+     geom_jitter() +
+    theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+exploratory.InorgN.JERC.plot
+
+exploratory.InorgN.OSBSplot <- ggplot(data=data.summary.D03.OSBS, aes(x=plotID, y=soilInorganicNugPerGram)) + 
+  geom_point(size=1.5, alpha = 1)  +
+        #scale_color_brewer(name = "SiteID", palette = "Dark2") + #color-blind friendly
+        ggtitle("Average Soil Inorganic N by Plot within OSBS of D03") +
+       #scale_y_continuous(breaks = seq(0, 100, 10), limits = c(-15, 100)) +
+        ylab("Inorganic N (mcg/g)") +
+     geom_jitter() +
+    theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+exploratory.InorgN.OSBSplot
+
+
+```
+
+# Figures at the site-level
+```{r}
+
+# Initial visualization of data for Inorganic N
+data.summary.D03.Exploratory <- data.summary.D03 %>%
+ group_by(siteID) %>%
+ summarise(soilInorganicNugPerGram_average = mean(soilInorganicNugPerGram),
+           soilInorganicNugPerGram_sd = sd(soilInorganicNugPerGram))
+
+exploratory.InorgN.D03 <- ggplot(data=data.summary.D03, aes(x=siteID, y=soilInorganicNugPerGram, group = siteID, color=siteID)) + 
+  geom_point(size=1.5, alpha = 0.3, position = position_jitterdodge(dodge.width = 0.5))  +
+  geom_point(data = data.summary.D03.Exploratory, aes(x = siteID, y = soilInorganicNugPerGram_average, group = siteID, color=siteID), size = 3.5, alpha = 0.8, position = position_dodge(width = 0.5)) +
+  geom_errorbar(data = data.summary.D03.Exploratory, aes(x= siteID, y = soilInorganicNugPerGram_average, ymin = (soilInorganicNugPerGram_average-soilInorganicNugPerGram_sd), ymax = (soilInorganicNugPerGram_average+soilInorganicNugPerGram_sd), colour = siteID), width = 0.2) +
+        scale_color_brewer(name = "SiteID", palette = "Dark2") + #color-blind friendly
+        ggtitle("Average Soil Inorganic N (ug/gram) by Site of D03") +
+       scale_y_continuous(breaks = seq(0, 100, 10), limits = c(-15, 100)) +
+        ylab("Inorganic N (mcg/g)") +
+        theme_classic(base_size = 16) +
+        theme(plot.title = element_text(size=16, hjust = 0.5),
+              axis.text.x=element_text(size=12, color = "black"),
+              axis.text.y=element_text(size=12),
+              axis.title.y=element_text(size=14), 
+              axis.title.x=element_blank(), 
+              legend.text=element_text(size=14),
+              legend.title=element_text(size=14),
+              legend.position = "none")
+
+# Initial visualization of data for Ammonium
+data.summary.D03.Exploratory.NH4 <- data.summary.D03 %>%
+ group_by(siteID) %>%
+ summarise(soilAmmoniumNugPerGram_average = mean(soilAmmoniumNugPerGram),
+           soilAmmoniumNugPerGram_sd = sd(soilAmmoniumNugPerGram))
+
+exploratory.ammonium.D03 <- ggplot(data=data.summary.D03, aes(x=siteID, y=soilAmmoniumNugPerGram, group = siteID, color=siteID)) + 
+  geom_point(size=1.5, alpha = 0.3, position = position_jitterdodge(dodge.width = 0.5))  +
+  geom_point(data = data.summary.D03.Exploratory.NH4, aes(x = siteID, y = soilAmmoniumNugPerGram_average, group = siteID, color=siteID), size = 3.5, alpha = 0.8, position = position_dodge(width = 0.5)) +
+  geom_errorbar(data = data.summary.D03.Exploratory.NH4, aes(x= siteID, y = soilAmmoniumNugPerGram_average, ymin = (soilAmmoniumNugPerGram_average-soilAmmoniumNugPerGram_sd), ymax = (soilAmmoniumNugPerGram_average+soilAmmoniumNugPerGram_sd), colour = siteID), width = 0.2) +
+        scale_color_brewer(name = "SiteID", palette = "Dark2") + #color-blind friendly
+        ggtitle("Average Soil Ammonium (ug/gram) by Site of D03") +
+       scale_y_continuous(breaks = seq(-10, 80, 10), limits = c(-10, 65)) +
+      scale_y_break(c(32, 48)) +
+        ylab("Ammonium (mcg/g)") +
+        theme_classic(base_size = 16) +
+        theme(plot.title = element_text(size=16, hjust = 0.5),
+              axis.text.x=element_text(size=12, color = "black"),
+              axis.text.y=element_text(size=12),
+              axis.title.y=element_text(size=14), 
+              axis.title.x=element_blank(), 
+              axis.text.y.right = element_blank(), #deals with weird ggbreak glitch
+              axis.line.y.right = element_blank(), #deals with weird ggbreak glitch
+              axis.ticks.y.right = element_blank(), #deals with weird ggbreak glitch
+              legend.text=element_text(size=14),
+              legend.title=element_text(size=14),
+              legend.position = "none")
+
+exploratory.InorgN.D03
+exploratory.ammonium.D03
+
+# Initial visualization of data for Mineralization
+data.summary.D03.Exploratory.Mineralization <- data.summary.D03 %>%
+ group_by(siteID) %>%
+ summarise(netNminugPerGramPerDay_average = mean(netNminugPerGramPerDay), #averaging a rate, always messes with my head if appropriately statistically
+           netNminugPerGramPerDay_sd = sd(netNminugPerGramPerDay))
+
+exploratory.mineralization.D03 <- ggplot(data=data.summary.D03, aes(x=siteID, y=netNminugPerGramPerDay, group = siteID, color=siteID)) + 
+  geom_point(size=1.5, alpha = 0.3, position = position_jitterdodge(dodge.width = 0.5))  +
+  geom_point(data = data.summary.D03.Exploratory.Mineralization, aes(x = siteID, y = netNminugPerGramPerDay_average, group = siteID, color=siteID), size = 3.5, alpha = 0.8, position = position_dodge(width = 0.5)) +
+  geom_errorbar(data = data.summary.D03.Exploratory.Mineralization, aes(x= siteID, y = netNminugPerGramPerDay_average, ymin = (netNminugPerGramPerDay_average-netNminugPerGramPerDay_sd), ymax = (netNminugPerGramPerDay_average+netNminugPerGramPerDay_sd), colour = siteID), width = 0.2) +
+        scale_color_brewer(name = "SiteID", palette = "Dark2") + #color-blind friendly
+        ggtitle("Average Soil N Mineralization rate ((ug/gram)/day) by Site of D03") +
+       #scale_y_continuous(breaks = seq(-10, 80, 10), limits = c(-10, 65)) +
+     # scale_y_break(c(32, 48)) +
+        ylab("Mineralization ((mcg/g)/day)") +
+        theme_classic(base_size = 16) +
+        theme(plot.title = element_text(size=16, hjust = 0.5),
+              axis.text.x=element_text(size=12, color = "black"),
+              axis.text.y=element_text(size=12),
+              axis.title.y=element_text(size=14), 
+              axis.title.x=element_blank(), 
+             #axis.text.y.right = element_blank(), #deals with weird ggbreak glitch
+              #axis.line.y.right = element_blank(), #deals with weird ggbreak glitch
+              #axis.ticks.y.right = element_blank(), #deals with weird ggbreak glitch
+              legend.text=element_text(size=14),
+              legend.title=element_text(size=14),
+              legend.position = "none")
+
+exploratory.mineralization.D03 #note, getting a missing values warning
+```
+
+# Figures at the site-level
+```{r}
+
+D03.nitrogen.df <- read.csv("data.summary.D03_outputV2.csv")
+str(D03.nitrogen.df) #370 observations
+
+#When initially tried to join with carbon dataframe, was losing observations, likely because there are multiple observations by plot. Going to calculate by plot level for inorganic nitrogen and see if that was the issue...
+
+D03.nitrogen.df.plot <- D03.nitrogen.df %>%
+  group_by(plotID) %>%
+  summarise(soilInorganicNugPerGram.average = mean(soilInorganicNugPerGram)) #note, this is on a per gram basis, not on the plot scale... could calculate that...
+
+
+##playing around calculating on the plot scale precisely
+
+#note this is contingent on having the other carbon data in environment
+str(soil.data.DSNY) #70
+str(soil.data.JERC) #103
+str(soil.data.OSBS) #80
+
+soil.data.D03.join1 <- full_join(soil.data.DSNY, soil.data.JERC)
+soil.data.D03.all <- full_join(soil.data.D03.join1, soil.data.OSBS)
+str(soil.data.D03.all) #looks like it adds up at 253
+#Okay, I want to extract bulk density averaged at the plot level to join onto to nitrogen dataframe...
+
+soil.data.D03.all.BDmeans.plots <- soil.data.D03.all %>%
+  distinct(siteID, plotID, BD.plot.mean) %>%
+  filter(!is.nan(BD.plot.mean))
+
+soil.data.D03.all.BDmeans.sites <- soil.data.D03.all %>%
+  distinct(siteID, BD.site.mean) %>%
+  group_by(siteID) %>%
+  summarise(BD.site.mean = mean(BD.site.mean)) #had to do some coercive coding since unsure why distinct insisted on still grouping by plotID althought no specified
+
+#Now, to avoid excessive NAs, we are going to sequentially join to first add plot mean onto nitrogen dataframe, and then add on the site-level mean to ensure that doesn't have any NAs. From there, can then gap fill into a new bulk density variable to be able to calculate the total inorganic nitrogen that would be estimated at the plot level for each sample, to then use all those estimate to produce the 'average' estimate at the plot and site level for lm() with carbon, since they will now be on the same scale (I think)
+
+D03.nitrogen.df.BDinfo <- left_join(D03.nitrogen.df, soil.data.D03.all.BDmeans.plots)
+D03.nitrogen.df.BDinfo <- left_join(D03.nitrogen.df.BDinfo, soil.data.D03.all.BDmeans.sites) 
+
+#Appears to have been successful, now let's gap fill to make that bulk density variable in the dataframe
+#Telling R to see if the bulk density of the plot mean is available, and if it is not, then apply the value from the site mean variable, or else just keep the NA in the plot mean in this new variable
+D03.nitrogen.df.BDinfo <- D03.nitrogen.df.BDinfo %>%
+  mutate(bulkdensity = if_else(is.na(BD.plot.mean), BD.site.mean, BD.plot.mean))
+
+sum(is.na(D03.nitrogen.df.BDinfo$bulkdensity)) #No NAs!
+
+
+#(1)	Given bulk density and the depth increment of each horizon in your dataframe, create a new column in your dataframe that is the total amount of soil in grams for a m^2 area
+#We used a m2 area, so use 100 cm x 100 cm  = 10,000 cm2 for the sample area in this case too.
+
+
+D03.nitrogen.df.draft <- D03.nitrogen.df.BDinfo %>%
+  mutate(sample.area.cm2 = 10000) %>%
+  mutate(sample.volume = sample.area.cm2*30) %>% #30 cm is the max depth for what is in the user guide... but like, we can maybe figure out actualy depth from other tables output by package that I do not have? 
+  mutate(g.soil = sample.volume*bulkdensity) %>% #should give units of g/m2  
+  mutate(InorganicN.ugm2 = g.soil*soilInorganicNugPerGram) %>% # g/m2 * ug / g = ug/m2 
+  mutate(InorganicN.ugHectare = InorganicN.ugm2 * 0.0001) # ug/m2 * m2/ha = g/ha
+
+
+
+# Initial visualization of data for Inorganic N
+D03.nitrogen.df.draft.Exploratory <- D03.nitrogen.df.draft %>%
+ group_by(siteID, plotID) %>%
+ summarise(InorganicN.ugHectare_average.plot = mean(InorganicN.ugHectare),
+           InorganicN.ugHectare_sd.plot = sd(InorganicN.ugHectare))
+
+exploratory.InorgN.D03 <- ggplot(data=D03.nitrogen.df.draft.Exploratory, aes(x=siteID, y=InorganicN.ugHectare_average.plot, group = siteID, color=siteID)) + 
+  geom_point(size=1.5, alpha = 0.3, position = position_jitterdodge(dodge.width = 0.5))  +
+        scale_color_brewer(name = "SiteID", palette = "Dark2") + #color-blind friendly
+        ggtitle("Average Soil Inorganic N per 1 Hectare by Site of D03") +
+       #scale_y_continuous(breaks = seq(0, 100, 10), limits = c(-15, 100)) +
+        ylab("Inorganic N (mcg/hectare)") +
+        theme_classic(base_size = 16) +
+        theme(plot.title = element_text(size=16, hjust = 0.5),
+              axis.text.x=element_text(size=12, color = "black"),
+              axis.text.y=element_text(size=12),
+              axis.title.y=element_text(size=14), 
+              axis.title.x=element_blank(), 
+              legend.text=element_text(size=14),
+              legend.title=element_text(size=14),
+              legend.position = "none")
+exploratory.InorgN.D03
+
+
+```
+
