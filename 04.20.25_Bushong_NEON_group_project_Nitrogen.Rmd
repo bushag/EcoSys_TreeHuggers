@@ -14,7 +14,7 @@ setwd("~/Documents/Spring 2025/ECOL8322")
 Environment
 ```{r}											
 #install.packages("neonUtilities")						
-library(neonUtilities)								
+library(neonUtilities)					
 library(tidyverse)
 library(lubridate)
 library(dplyr)
@@ -131,7 +131,7 @@ exploratory.InorgN.D03 <- ggplot(data=data.summary.D03, aes(x=siteID, y=soilInor
   geom_errorbar(data = data.summary.D03.Exploratory, aes(x= siteID, y = soilInorganicNugPerGram_average, ymin = (soilInorganicNugPerGram_average-soilInorganicNugPerGram_sd), ymax = (soilInorganicNugPerGram_average+soilInorganicNugPerGram_sd), colour = siteID), width = 0.2) +
         scale_color_brewer(name = "SiteID", palette = "Dark2") + #color-blind friendly
         ggtitle("Average Soil Inorganic N (ug/gram) by Site of D03") +
-       scale_y_continuous(breaks = seq(0, 100, 10), limits = c(-15, 100)) +
+       #scale_y_continuous(breaks = seq(0, 100, 10), limits = c(-15, 100)) +
         ylab("Inorganic N (mcg/g)") +
         theme_classic(base_size = 16) +
         theme(plot.title = element_text(size=16, hjust = 0.5),
@@ -155,7 +155,7 @@ exploratory.ammonium.D03 <- ggplot(data=data.summary.D03, aes(x=siteID, y=soilAm
   geom_errorbar(data = data.summary.D03.Exploratory.NH4, aes(x= siteID, y = soilAmmoniumNugPerGram_average, ymin = (soilAmmoniumNugPerGram_average-soilAmmoniumNugPerGram_sd), ymax = (soilAmmoniumNugPerGram_average+soilAmmoniumNugPerGram_sd), colour = siteID), width = 0.2) +
         scale_color_brewer(name = "SiteID", palette = "Dark2") + #color-blind friendly
         ggtitle("Average Soil Ammonium (ug/gram) by Site of D03") +
-       scale_y_continuous(breaks = seq(-10, 80, 10), limits = c(-10, 65)) +
+       #scale_y_continuous(breaks = seq(-10, 80, 10), limits = c(-10, 65)) +
       scale_y_break(c(32, 48)) +
         ylab("Ammonium (mcg/g)") +
         theme_classic(base_size = 16) +
@@ -205,7 +205,7 @@ exploratory.mineralization.D03 <- ggplot(data=data.summary.D03, aes(x=siteID, y=
 exploratory.mineralization.D03 #note, getting a missing values warning
 ```
 
-# Figures at the site-level
+# Data Carpentry Figures at the site-level
 ```{r}
 
 D03.nitrogen.df <- read.csv("data.summary.D03_outputV2.csv")
@@ -261,22 +261,24 @@ D03.nitrogen.df.draft <- D03.nitrogen.df.BDinfo %>%
   mutate(sample.volume = sample.area.cm2*30) %>% #30 cm is the max depth for what is in the user guide... but like, we can maybe figure out actualy depth from other tables output by package that I do not have? 
   mutate(g.soil = sample.volume*bulkdensity) %>% #should give units of g/m2  
   mutate(InorganicN.ugm2 = g.soil*soilInorganicNugPerGram) %>% # g/m2 * ug / g = ug/m2 
-  mutate(InorganicN.ugHectare = InorganicN.ugm2 * 0.0001) # ug/m2 * m2/ha = g/ha
-
+  mutate(InorganicN.ugHectare = InorganicN.ugm2 * (10000/1)) %>% # ug/m2 * m2/ha = ug/ha
+  mutate(InorganicN.gHectare = InorganicN.ugHectare * (1/1000000)) %>% #ug/ha * g/ug= g/ha
+  mutate(InorganicN.kgHectare = InorganicN.gHectare * (1/1000)) # g/ha * kg/g = kg/ha 
+write.csv(D03.nitrogen.df.draft, "D03.nitrogen.df.draft.csv")
 
 
 # Initial visualization of data for Inorganic N
 D03.nitrogen.df.draft.Exploratory <- D03.nitrogen.df.draft %>%
  group_by(siteID, plotID) %>%
- summarise(InorganicN.ugHectare_average.plot = mean(InorganicN.ugHectare),
-           InorganicN.ugHectare_sd.plot = sd(InorganicN.ugHectare))
+ summarise(InorganicN.kgHectare_average.plot = mean(InorganicN.kgHectare),
+           InorganicN.kgHectare_sd.plot = sd(InorganicN.kgHectare))
 
-exploratory.InorgN.D03 <- ggplot(data=D03.nitrogen.df.draft.Exploratory, aes(x=siteID, y=InorganicN.ugHectare_average.plot, group = siteID, color=siteID)) + 
+exploratory.InorgN.D03 <- ggplot(data=D03.nitrogen.df.draft.Exploratory, aes(x=siteID, y=InorganicN.kgHectare_average.plot, group = siteID, color=siteID)) + 
   geom_point(size=1.5, alpha = 0.3, position = position_jitterdodge(dodge.width = 0.5))  +
         scale_color_brewer(name = "SiteID", palette = "Dark2") + #color-blind friendly
         ggtitle("Average Soil Inorganic N per 1 Hectare by Site of D03") +
        #scale_y_continuous(breaks = seq(0, 100, 10), limits = c(-15, 100)) +
-        ylab("Inorganic N (mcg/hectare)") +
+        ylab("Inorganic N (kg/hectare)") +
         theme_classic(base_size = 16) +
         theme(plot.title = element_text(size=16, hjust = 0.5),
               axis.text.x=element_text(size=12, color = "black"),
