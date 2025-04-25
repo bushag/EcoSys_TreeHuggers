@@ -808,9 +808,10 @@ mutate(bulkdensity = if_else(is.na(bulkDensFieldMoist), bulkDensThirdBar , bulkD
 
 sum(is.na(soil.data.BLAN$bulkdensity)) #how many NAs? 11 
 
-#######NOTE, at this point for BLAN, bulk filling complete
 
 #(4)	If you still have NAs use the following steps to backfill using this logic: if the NEON provided bulk density value is NA, apply the plot-level mean to the variable ‘bulkdensity’, else, apply the NEON provide value to the variable ‘bulkdensity’.
+
+#####NOTE#####Was having issues getting rid of NAs after back and gap filling. Decided to go back and have the mean depend on bulkdensthirdbar since there bulkdensfieldmoist wasnt working. Then decided to swap bulkdensthirdbar with bulkdensity in the following code.
 
 soil.data.BLAN <- soil.data.BLAN %>%
 group_by(plotID) %>%
@@ -826,7 +827,7 @@ mutate(bulkdensity = if_else(is.na(bulkdensity), BD.site.mean, bulkdensity))
 
 sum(is.na(soil.data.BLAN$bulkdensity)) #how many NAs? 0
 
-# View(soil.data.BLAN)
+View(soil.data.BLAN)
 
 ```
 
