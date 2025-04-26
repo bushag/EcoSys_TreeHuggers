@@ -1,7 +1,7 @@
 ---
 title: "Bushong_Individual_Code_NEON_group_project"
 author: "AGB"
-date: "Merged from 04.14.25 Carbon RMD & 04.20.25 Nitrogen RMD on 04.25.2025"
+date: "04.26.25 -- Merged from 04.14.25 Carbon RMD & 04.20.25 Nitrogen RMD on 04.25.2025"
 output:
   word_document: 
     number_sections: true
@@ -1408,6 +1408,7 @@ exploratory.InorgN.D03
 ```
 
 
+
 #Working Code, still need to add Nitrogen for D19--- Joining C and N dataframes for D03; Carpentry to join by domain
 ```{r}
 
@@ -1418,7 +1419,6 @@ exploratory.InorgN.D03
 # D08 = Trey
 
 # General Joining Approach -- Join carbon and nitrogen by domain initially; Then join these dataframes across domains. 
-## Timing of dataframes makes that approach challenging, so joining D03, D02 
 
 # D03 #######################################
 ##(1) Adding in Domain ID for each dataframe
@@ -1471,25 +1471,61 @@ D02.fulljoin.CN.test.df <- full_join(D02.streamlined.carbon.df, D02.streamlined.
 
 
 #D19 #######################################
-## Reading in the merged carbon data for D19
-D19.carbon.merged.df <- read.csv("D19.carbon.merged.csv")
-str(D19.carbon.merged.df)
+
+# Commenting out this code when initially trying to address merging issues with original merged data, went back and reconstructed merged carbon dataframe #######
+
+# Reading in the merged carbon data for D19
+# D19.carbon.merged.df <- read.csv("D19.carbon.merged.csv")
+# # str(D19.carbon.merged.df)
+# 
+# ###Added Data carpentry to try to fix the many to many relationship
+# D19.carbon.merged.df$siteID.corrected = substr(D19.carbon.merged.df$plotID, 1,4) #issue with NAs being present for site ID propogating error in merging
+# D19.carbon.merged.df <- D19.carbon.merged.df %>%
+#   filter(siteID.corrected == "BONA" | siteID.corrected == "DEJU" | siteID.corrected == "HEAL") #Removing megapit values, check with Kylie and see if that makes sense
+# D19.carbon.merged.df <- D19.carbon.merged.df %>%
+#   select(-c(siteID)) #removing original siteID variable with NAs
+# D19.carbon.merged.df <- D19.carbon.merged.df %>% 
+#   rename(siteID = siteID.corrected) #renaming the corrected siteID column to just "siteID" for merging purposes
+
+# Reading in the merged nitrogen data for D19
+D19.nitrogen.merged.df <- read.csv("D19.nitrogen.df.draft.csv") #There are NAs in the plotID column making, seems like it is causing an issue to merge; Seems like they have siteID and a mean bulk density for the plot but not plotID... will remove for now to see if helps joining issue
+
+D19.nitrogen.merged.df <- D19.nitrogen.merged.df %>%
+  filter(!is.na(plotID)) #removing NAs in plotID
+# str(D19.nitrogen.merged.df)
+
+
+#Carbon dataframe -- Trying to fix merging issues
+AGB.trees.by.plot.D19 <- read.csv("AGB.trees.by.plot.D19.csv")
+roots.by.plot.D19 <- read.csv("roots.by.plot.D019.csv")
+soil.by.plot.D19 <- read.csv("soil.by.plot.D19.csv")
+
+D19.carbon.merged.step1.df <- full_join(AGB.trees.by.plot.D19, roots.by.plot.D19, by=join_by(siteID, plotID)) 
+D19.carbon.merged.Anna.df <- full_join(D19.carbon.merged.step1.df, soil.by.plot.D19, by=join_by(siteID, plotID))
+# str(D08.carbon.merged.df) #131
+D19.carbon.merged.Anna.df <- D19.carbon.merged.Anna.df[-c(77, 78), ] #Removing megapit values, check with Kylie and see if that makes sense
+write.csv(D19.carbon.merged.Anna.df, "D08.carbon.merged.Anna.csv")
+
 
 ##(1) Adding in Domain ID
-D19.carbon.merged.df <- D19.carbon.merged.df %>%
+D19.carbon.merged.df <- D19.carbon.merged.Anna.df %>%
   mutate(domainID = "D19")
 
-#######insert nitrogen
+D19.nitrogen.merged.df <- D19.nitrogen.merged.df %>%
+  mutate(domainID = "D19")
+
 
 ##(2) Selecting variables needed to streamline bulkiness of df
 D19.streamlined.carbon.df <- D19.carbon.merged.df %>%
   select(domainID, siteID, plotID, AGB.C.Mg.ha, mean.root.MgC.ha, soil.C.Mg.ha, totalSampledAreaTrees, plot.AGB)
-# str(D19.streamlined.carbon.df) # 97 x 8
+ # str(D19.streamlined.carbon.df) # 95 x 8
 
-#######insert nitrogen
+D19.streamlined.nitrogen.df <- D19.nitrogen.merged.df %>%
+  select(domainID, siteID, plotID, sampleID, collectDate, InorganicN.kgHectare, soilAmmoniumNugPerGram, soilInorganicNugPerGram, netNminugPerGramPerDay, netNitugPerGramPerDay)
+# str(D19.streamlined.nitrogen.df)
 
 ##(3) Joining the streamlined carbon and nitrogen dataframes together for D02
-###to do
+D19.fulljoin.CN.test.df <- full_join(D19.streamlined.carbon.df, D19.streamlined.nitrogen.df) #getting a many-to-many relationship warning; iteratively going, seems like the many-to-many is related to DEJU_045.... Went ahead and remerged carbon dataframe as that seemed to be the source of the issue; Doing so seemed to fix the warning and visual inspection looks correct
 
 
 #D08 ##################################
@@ -1538,12 +1574,14 @@ str(D08.fulljoin.CN.test.df) # 554 x 15
 #Testing the join of D03, D02, D08 ##################################
 D02.D03.fulljoin.CN.test.df <- full_join(D02.fulljoin.CN.test.df, D03.fulljoin.CN.test.df)
 D02.D03.D08.fulljoin.CN.test.df <- full_join(D02.D03.fulljoin.CN.test.df, D08.fulljoin.CN.test.df)
-# str(D02.D03.D08.fulljoin.CN.test.df) #1479
+D02.D03.D08.D19.fulljoin.CN.test.df <- full_join(D02.D03.D08.fulljoin.CN.test.df, D19.fulljoin.CN.test.df)
+# str(D02.D03.D08.D19.fulljoin.CN.test.df) #1763
 
-write.csv(D02.D03.D08.fulljoin.CN.test.df, "D02.D03.D08.fulljoin.CN.test.csv")
+write.csv(D02.D03.D08.D19.fulljoin.CN.test.df, "D02.D03.D08.D19.fulljoin.CN.test.csv")
 
 
-D02.D03.D08.fulljoin.CN.test.df$year= substr(D02.D03.D08.fulljoin.CN.test.df$collectDate, 1,4)
+# Initial created for autocorrelation field, doesn't seem to be needed though so commented out
+# D02.D03.D08.fulljoin.CN.test.df$year= substr(D02.D03.D08.fulljoin.CN.test.df$collectDate, 1,4)
   
 
 ```
@@ -1556,7 +1594,7 @@ D02.D03.D08.fulljoin.CN.test.df$year= substr(D02.D03.D08.fulljoin.CN.test.df$col
 soil.model.test <- lme(InorganicN.kgHectare ~ soil.C.Mg.ha + domainID + soil.C.Mg.ha*domainID,
                     random = ~1 | siteID/plotID,
                     correlation = corAR1(), #currently left blank for now, it seems like it'll just go to default value, but looks like it may be good practice to specify the time variable and nesting structure here. Unsure if that would appropriately set autocorrelation related to the inorganic N
-                    data = D02.D03.D08.fulljoin.CN.test.df,
+                    data = D02.D03.D08.D19.fulljoin.CN.test.df,
                     na.action=na.exclude)
 summary(soil.model.test)
 # No significant main effect of soil carbon
@@ -1566,22 +1604,25 @@ summary(soil.model.test)
 tree.model.test <- lme(InorganicN.kgHectare ~ AGB.C.Mg.ha + domainID + AGB.C.Mg.ha*domainID,
                     random = ~1 | siteID/plotID,
                     correlation = corAR1(), #currently left blank for now, it seems like it'll just go to default value, but looks like it may be good practice to specify the time variable and nesting structure here. Unsure if that would appropriately set autocorrelation related to the inorganic N
-                    data = D02.D03.D08.fulljoin.CN.test.df,
+                    data = D02.D03.D08.D19.fulljoin.CN.test.df,
                     na.action=na.exclude)
 summary(tree.model.test)
-# No significant relationships
+# No significant main effect of soil carbon
+# Significant interaction between soil carbon and D19, when compared to D02 as the reference domain. Specifically, the effect of soil carbon on inorganic N is modified by +0.236 units compared to the reference domain
 
 # Roots ##########################
 roots.model.test <- lme(InorganicN.kgHectare ~ mean.root.MgC.ha + domainID + mean.root.MgC.ha*domainID,
                     random = ~1 | siteID/plotID,
                     correlation = corAR1(), #currently left blank for now, it seems like it'll just go to default value, but looks like it may be good practice to specify the time variable and nesting structure here. Unsure if that would appropriately set autocorrelation related to the inorganic N
-                    data = D02.D03.D08.fulljoin.CN.test.df,
+                    data = D02.D03.D08.D19.fulljoin.CN.test.df,
                     na.action=na.exclude)
 summary(roots.model.test)
 # Significant main effect of soil carbon
-# Significant main effect of D03 relative to D02; So when root carbon is held at 0, the inorganic N is 19.7 units lower in domain D03 than D02
+# Significant main effect of D03 relative to D02
+# Significant main effect of D08 relative to D02
 # Significant interaction between root carbon and D03
 # Significant interaction between root carbon and D08
+# Significant interaction between root carbon and D19
 ```
 
 
