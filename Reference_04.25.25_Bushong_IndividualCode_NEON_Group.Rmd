@@ -1,0 +1,1633 @@
+---
+title: "Bushong_Individual_Code_NEON_group_project"
+author: "AGB"
+date: "Merged from 04.14.25 Carbon RMD & 04.20.25 Nitrogen RMD on 04.25.2025"
+output:
+  word_document: 
+    number_sections: true
+  pdf_document: 
+    toc: true
+    number_sections: true
+    toc_depth: 4
+  html_document: 
+    toc: true
+    toc_float: true
+    toc_depth: 4
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+setwd("~/Documents/Spring 2025/ECOL8322")
+```
+
+#Setting up the Environment
+```{r}											
+#install.packages("neonUtilities")						
+library(neonUtilities)								
+library(tidyverse)
+library(lubridate)
+library(dplyr)
+library(ggplot2)
+library(ggbreak)
+library(patchwork)
+library(nlme)
+library(lme4)
+
+#Note, neonNTrans package for generating the inorganic nitrogen variable from the raw data product does not work on my version of R. For provided the output dataframes from this package, Kylie provided these since this package works with her version of R. I saw your note about potentially being able to purge or retain package version while updating R, but was concerned of messing something up, so we used this work around. I will eventually be able to update my R.... eventually...
+```
+
+#DSNY -- Tree Carbon Stocks
+##Downloading the data of interest from NEON
+```{r}												
+# DSNY.trees <- loadByProduct(dpID="DP1.10098.001",
+# site=c("DSNY"),
+# startdate="2012-01", enddate="2024-12",
+# package="basic")
+# 
+# list2env(DSNY.trees, .GlobalEnv)
+```	
+
+##Write CSVs for four tables extracted
+```{r}											
+# #readme_10098
+# write.csv(readme_10098, "readme_10098_DSNY.csv")
+# 
+# #vst_perplotperyear
+# write.csv(vst_perplotperyear, "vst_perplotperyear_DSNY.csv")
+# 
+# #vst_apparentindividual
+# write.csv(vst_apparentindividual, "vst_apparentindividual_DSNY.csv")
+# 
+# #variables_10098
+# write.csv(variables_10098, "variables_10098_DSNY.csv")
+```
+
+Reminder for above, readme file has a description of all the dataframes and variables defines all the variables in each dataframe.
+
+##Read in one of the CSVs we wrote above and revise to be compatible with the one that holds tree measurements
+```{r}											
+vst_perplotperyear_DSNY <- read.csv("vst_perplotperyear_DSNY.csv")
+variables_10098_DSNY <- read.csv("variables_10098_DSNY.csv")
+
+#making a new dataframe with selected variables
+plot.info.vst.DSNY <- vst_perplotperyear_DSNY %>%
+select(date, domainID, siteID, plotID, plotType, nlcdClass, totalSampledAreaTrees)
+
+#making a new variable that containers only year
+plot.info.vst.DSNY <- plot.info.vst.DSNY %>%
+mutate(year= year(date))
+
+#making new dataframe where you filter only the most recent sampling year for each PLOT
+plot.info.vst.DSNY.rec <- plot.info.vst.DSNY %>%
+group_by(plotID)%>%
+filter(year==max(year))
+
+#remove NAs from the totalSampledAreaTrees variable 
+plot.info.vst.DSNY.rec <- plot.info.vst.DSNY.rec %>% filter(totalSampledAreaTrees!="NA")
+
+```
+
+##Repeating the process above for individual dataframe
+```{r}											
+vst_apparentindividual_DSNY <- read.csv("vst_apparentindividual_DSNY.csv")
+
+#making a new dataframe with selected variables
+individuals.vst.DSNY <- vst_apparentindividual_DSNY %>%
+select(date, siteID, plotID, individualID, growthForm, stemDiameter, plantStatus)
+
+#making a new variable that containers only year
+individuals.vst.DSNY <- individuals.vst.DSNY %>%
+mutate(year= year(date))
+
+#making new dataframe where you filter only the most recent sampling year for each INDIVIDUAL
+most.recent.individuals.vst.DSNY <- individuals.vst.DSNY %>%
+group_by(individualID) %>%
+filter(year==max(year))
+
+#making new dataframe where you filter the prior dataframe for only live trees
+most.recent.live.plants.DSNY.vst <- most.recent.individuals.vst.DSNY %>% filter(str_detect(plantStatus, "Live")) #little unsure here
+
+#making new dataframe for single bole trees, multi-bole trees, and small trees only
+most.recent.live.trees1.DSNY <- most.recent.live.plants.DSNY.vst %>%
+  filter(growthForm=="single bole tree" | growthForm=="multi-bole tree" | growthForm=="small tree")
+
+#for dataframe above now we are excluding trees that have a recorded stem diameter of NA, we need to do this for analysis
+most.recent.live.trees.DSNY <- subset(most.recent.live.trees1.DSNY, stemDiameter>0)
+
+```
+
+##Joining dataframes for DSNY
+```{r}
+
+# str(most.recent.live.trees.DSNY)
+# str(plot.info.vst.DSNY.rec)
+
+tree.data.DSNY <- left_join(most.recent.live.trees.DSNY, plot.info.vst.DSNY.rec)
+# str(tree.data.DSNY) #89
+
+tree.data.DSNY.complete<-subset(tree.data.DSNY, totalSampledAreaTrees>0)
+# str(tree.data.DSNY.complete) #35
+
+#We lost information for 54 trees when joining dataframes together.
+
+```
+
+##Calculating aboveground biomass based on allometric equation
+```{r}
+
+#need a new column in joined dataframe that represents biomass of each tree (in kg) called AGB
+#mixed hardwood allometric equation from jenkins et al 2003
+#Equation that I need to use is ABG (kg) = exp(B0 + B1 x ln(dbh))
+tree.data.DSNY.complete$AGB <- exp(-2.4800 + (2.4835*log(tree.data.DSNY.complete$stemDiameter))) #this equation gives kg
+
+#now need to create a new dataframe called AGB.trees.by.plot.DSNY
+AGB.trees.by.plot.DSNY <- tree.data.DSNY.complete %>%
+  group_by(siteID, plotID, totalSampledAreaTrees) %>% #grouping variables together
+  summarise(plot.AGB = sum(AGB)) #summing by grouping variables 
+# View(AGB.trees.by.plot.DSNY)
+
+AGB.trees.by.plot.DSNY$AGB.kg.m2<-AGB.trees.by.plot.DSNY$plot.AGB/AGB.trees.by.plot.DSNY$totalSampledAreaTrees #making it as kg/m2
+
+#Okay, need to get m2 to ha (10,000 m2 = 1 ha)
+#then to get kg to mg (1,000 kg = 1 mg)
+
+AGB.trees.by.plot.DSNY <- AGB.trees.by.plot.DSNY %>%
+  mutate(AGB.kg.m2 = plot.AGB/totalSampledAreaTrees) %>%
+  mutate(AGB.Mg.ha = (((AGB.kg.m2)*10))) %>%
+  mutate(AGB.C.Mg.ha = AGB.Mg.ha*0.47)
+# View(AGB.trees.by.plot.DSNY)
+
+
+```
+
+##Plot for aboveground carbon stock for DSNY
+```{r}
+ggplot(data=AGB.trees.by.plot.DSNY, aes(x=plotID, y=AGB.C.Mg.ha)) + 
+geom_jitter()+
+theme_classic()+
+theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+
+```
+
+
+#JERC -- Tree Carbon Stocks
+##Downloading the data of interest from NEON
+```{r}												
+# JERC.trees <- loadByProduct(dpID="DP1.10098.001",
+# site=c("JERC"),
+# startdate="2012-01", enddate="2024-12",
+# package="basic")
+# 
+# list2env(JERC.trees, .GlobalEnv)
+```	
+
+##Write CSVs for four tables extracted
+```{r}											
+# #readme_10098
+# write.csv(readme_10098, "readme_10098_JERC.csv")
+# 
+# #vst_perplotperyear
+# write.csv(vst_perplotperyear, "vst_perplotperyear_JERC.csv")
+# 
+# #vst_apparentindividual
+# write.csv(vst_apparentindividual, "vst_apparentindividual_JERC.csv")
+# 
+# #variables_10098
+# write.csv(variables_10098, "variables_10098_JERC.csv")
+```
+
+##Read in one of the CSVs we wrote above and revise to be compatible with the one that holds tree measurements
+```{r}											
+vst_perplotperyear_JERC <- read.csv("vst_perplotperyear_JERC.csv")
+variables_10098_JERC <- read.csv("variables_10098_JERC.csv")
+
+#making a new dataframe with selected variables
+plot.info.vst.JERC <- vst_perplotperyear_JERC %>%
+select(date, domainID, siteID, plotID, plotType, nlcdClass, totalSampledAreaTrees)
+
+#making a new variable that containers only year
+plot.info.vst.JERC <- plot.info.vst.JERC %>%
+mutate(year= year(date))
+
+#making new dataframe where you filter only the most recent sampling year for each PLOT
+plot.info.vst.JERC.rec <- plot.info.vst.JERC %>%
+group_by(plotID)%>%
+filter(year==max(year))
+
+#remove NAs from the totalSampledAreaTrees variable 
+plot.info.vst.JERC.rec <- plot.info.vst.JERC.rec %>% filter(totalSampledAreaTrees!="NA")
+
+```
+
+##Repeating the process above for individual dataframe
+```{r}											
+vst_apparentindividual_JERC <- read.csv("vst_apparentindividual_JERC.csv")
+
+#making a new dataframe with selected variables
+individuals.vst.JERC <- vst_apparentindividual_JERC %>%
+select(date, siteID, plotID, individualID, growthForm, stemDiameter, plantStatus)
+
+#making a new variable that containers only year
+individuals.vst.JERC <- individuals.vst.JERC %>%
+mutate(year= year(date))
+
+#making new dataframe where you filter only the most recent sampling year for each INDIVIDUAL
+most.recent.individuals.vst.JERC <- individuals.vst.JERC %>%
+group_by(individualID) %>%
+filter(year==max(year))
+
+#making new dataframe where you filter the prior dataframe for only live trees
+most.recent.live.plants.JERC.vst <- most.recent.individuals.vst.JERC %>%
+filter(str_detect(plantStatus, "Live")) #little unsure here
+
+#making new dataframe for single bole trees, multi-bole trees, and small trees only
+most.recent.live.trees1.JERC <- most.recent.live.plants.JERC.vst %>%
+  filter(growthForm=="single bole tree" | growthForm=="multi-bole tree" | growthForm=="small tree")
+
+#for dataframe above now we are excluding trees that have a recorded stem diameter of NA, we need to do this for analysis
+most.recent.live.trees.JERC <- subset(most.recent.live.trees1.JERC, stemDiameter>0)
+
+```
+
+##Joining dataframes for JERC
+```{r}
+
+# str(most.recent.live.trees.JERC)
+# str(plot.info.vst.JERC.rec)
+
+tree.data.JERC <- left_join(most.recent.live.trees.JERC, plot.info.vst.JERC.rec)
+ str(tree.data.JERC) #668
+
+tree.data.JERC.complete<-subset(tree.data.JERC, totalSampledAreaTrees>0)
+ str(tree.data.JERC.complete) #276
+
+#We lost information for 392 trees when joining dataframes together.
+
+```
+
+##Calculating aboveground biomass based on allometric equation
+```{r}
+
+#need a new column in joined dataframe that represents biomass of each tree (in kg) called AGB
+#mixed hardwood allometric equation from jenkins et al 2003
+#Equation that I need to use is ABG (kg) = exp(B0 + B1 x ln(dbh))
+tree.data.JERC.complete$AGB <- exp(-2.4800 + (2.4835*log(tree.data.JERC.complete$stemDiameter))) #this equation gives kg
+
+#now need to create a new dataframe called AGB.trees.by.plot.JERC
+AGB.trees.by.plot.JERC <- tree.data.JERC.complete %>%
+  group_by(siteID, plotID, totalSampledAreaTrees) %>% #grouping variables together
+  summarise(plot.AGB = sum(AGB)) #summing by grouping variables 
+#View(AGB.trees.by.plot.JERC)
+
+AGB.trees.by.plot.JERC$AGB.kg.m2<-AGB.trees.by.plot.JERC$plot.AGB/AGB.trees.by.plot.JERC$totalSampledAreaTrees #making it as kg/m2
+
+#Okay, need to get m2 to ha (10,000 m2 = 1 ha)
+#then to get kg to mg (1,000 kg = 1 mg)
+
+AGB.trees.by.plot.JERC <- AGB.trees.by.plot.JERC %>%
+  mutate(AGB.kg.m2 = plot.AGB/totalSampledAreaTrees) %>%
+  mutate(AGB.Mg.ha = (((AGB.kg.m2)*10))) %>%
+  mutate(AGB.C.Mg.ha = AGB.Mg.ha*0.47)
+# View(AGB.trees.by.plot.JERC)
+
+```
+
+##Plot for aboveground carbon stock for JERC
+```{r}
+ggplot(data=AGB.trees.by.plot.JERC, aes(x=plotID, y=AGB.C.Mg.ha)) + 
+geom_jitter()+
+theme_classic()+
+theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+
+```
+
+#OSBS -- Tree Carbon Stocks
+##Downloading the data of interest from NEON
+```{r}												
+# OSBS.trees <- loadByProduct(dpID="DP1.10098.001",
+# site=c("OSBS"),
+# startdate="2012-01", enddate="2024-12",
+# package="basic")
+# 
+# list2env(OSBS.trees, .GlobalEnv)
+```	
+
+##Write CSVs for four tables extracted
+```{r}											
+# #readme_10098
+# write.csv(readme_10098, "readme_10098_OSBS.csv")
+# 
+# #vst_perplotperyear
+# write.csv(vst_perplotperyear, "vst_perplotperyear_OSBS.csv")
+# 
+# #vst_apparentindividual
+#  write.csv(vst_apparentindividual, "vst_apparentindividual_OSBS.csv")
+# 
+# #variables_10098
+# write.csv(variables_10098, "variables_10098_OSBS.csv")
+```
+
+##Read in one of the CSVs we wrote above and revise to be compatible with the one that holds tree measurements
+```{r}											
+vst_perplotperyear_OSBS <- read.csv("vst_perplotperyear_OSBS.csv")
+variables_10098_OSBS <- read.csv("variables_10098_OSBS.csv")
+
+#making a new dataframe with selected variables
+plot.info.vst.OSBS <- vst_perplotperyear_OSBS %>%
+select(date, domainID, siteID, plotID, plotType, nlcdClass, totalSampledAreaTrees)
+
+#making a new variable that containers only year
+plot.info.vst.OSBS <- plot.info.vst.OSBS %>%
+mutate(year= year(date))
+
+#making new dataframe where you filter only the most recent sampling year for each PLOT
+plot.info.vst.OSBS.rec <- plot.info.vst.OSBS %>%
+group_by(plotID)%>%
+filter(year==max(year))
+
+#remove NAs from the totalSampledAreaTrees variable 
+plot.info.vst.OSBS.rec <- plot.info.vst.OSBS.rec %>% filter(totalSampledAreaTrees!="NA")
+
+```
+
+##Repeating the process above for individual dataframe
+```{r}											
+vst_apparentindividual_OSBS <- read.csv("vst_apparentindividual_OSBS.csv")
+
+#making a new dataframe with selected variables
+individuals.vst.OSBS <- vst_apparentindividual_OSBS %>%
+select(date, siteID, plotID, individualID, growthForm, stemDiameter, plantStatus)
+
+#making a new variable that containers only year
+individuals.vst.OSBS <- individuals.vst.OSBS %>%
+mutate(year= year(date))
+
+#making new dataframe where you filter only the most recent sampling year for each INDIVIDUAL
+most.recent.individuals.vst.OSBS <- individuals.vst.OSBS %>%
+group_by(individualID) %>%
+filter(year==max(year))
+
+#making new dataframe where you filter the prior dataframe for only live trees
+most.recent.live.plants.OSBS.vst <- most.recent.individuals.vst.OSBS %>%
+filter(str_detect(plantStatus, "Live"))
+
+#making new dataframe for single bole trees, multi-bole trees, and small trees only
+most.recent.live.trees1.OSBS <- most.recent.live.plants.OSBS.vst %>%
+  filter(growthForm=="single bole tree" | growthForm=="multi-bole tree" | growthForm=="small tree")
+
+#for dataframe above now we are excluding trees that have a recorded stem diameter of NA, we need to do this for analysis
+most.recent.live.trees.OSBS <- subset(most.recent.live.trees1.OSBS, stemDiameter>0)
+
+```
+
+##Joining dataframes for OSBS
+```{r}
+
+# str(most.recent.live.trees.OSBS)
+# str(plot.info.vst.OSBS.rec)
+
+tree.data.OSBS <- left_join(most.recent.live.trees.OSBS, plot.info.vst.OSBS.rec)
+# str(tree.data.OSBS) #1129
+
+tree.data.OSBS.complete<-subset(tree.data.OSBS, totalSampledAreaTrees>0)
+# str(tree.data.OSBS.complete) #365
+
+#We lost information for 764 trees when joining dataframes together.
+
+```
+
+##Calculating aboveground biomass based on allometric equation
+```{r}
+
+#need a new column in joined dataframe that represents biomass of each tree (in kg) called AGB
+#mixed hardwood allometric equation from jenkins et al 2003
+#Equation that I need to use is ABG (kg) = exp(B0 + B1 x ln(dbh))
+tree.data.OSBS.complete$AGB <- exp(-2.4800 + (2.4835*log(tree.data.OSBS.complete$stemDiameter))) #this equation gives kg
+
+#now need to create a new dataframe called AGB.trees.by.plot.OSBS
+AGB.trees.by.plot.OSBS <- tree.data.OSBS.complete %>%
+  group_by(siteID, plotID, totalSampledAreaTrees) %>% #grouping variables together
+  summarise(plot.AGB = sum(AGB)) #summing by grouping variables 
+# View(AGB.trees.by.plot.OSBS)
+
+AGB.trees.by.plot.OSBS$AGB.kg.m2<-AGB.trees.by.plot.OSBS$plot.AGB/AGB.trees.by.plot.OSBS$totalSampledAreaTrees #making it as kg/m2
+
+#Okay, need to get m2 to ha (10,000 m2 = 1 ha)
+#then to get kg to mg (1,000 kg = 1 mg)
+
+AGB.trees.by.plot.OSBS <- AGB.trees.by.plot.OSBS %>%
+  mutate(AGB.kg.m2 = plot.AGB/totalSampledAreaTrees) %>%
+  mutate(AGB.Mg.ha = (((AGB.kg.m2)*10))) %>%
+  mutate(AGB.C.Mg.ha = AGB.Mg.ha*0.47)
+# View(AGB.trees.by.plot.OSBS)
+
+```
+
+##Plot for aboveground carbon stock for OSBS
+```{r}
+ggplot(data=AGB.trees.by.plot.OSBS, aes(x=plotID, y=AGB.C.Mg.ha)) + 
+geom_jitter()+
+theme_classic()+
+theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+
+```
+
+#Joining dataframes across D03 (Southeastern longleaf pine forests) for Tree Carbon Stocks -- AGB.trees.by.plot.D03
+```{r}
+
+# str(AGB.trees.by.plot.DSNY) #8 plots
+# str(AGB.trees.by.plot.JERC) #13 plots
+# str(AGB.trees.by.plot.OSBS) #17 plots
+
+AGB.trees.by.plot.D03 <- full_join(AGB.trees.by.plot.DSNY, AGB.trees.by.plot.JERC)
+AGB.trees.by.plot.D03 <- full_join(AGB.trees.by.plot.D03, AGB.trees.by.plot.OSBS)
+#str(AGB.trees.by.plot.D03) #38 plots
+```
+
+
+#Visualizing Tree Carbon Stocks by site of D03
+```{r}
+
+AGB.trees.by.plot.D03.summarise <- AGB.trees.by.plot.D03 %>%
+ group_by(siteID) %>%
+ summarise(AGB.C.Mg.ha_siteAverage = mean(AGB.C.Mg.ha),
+           AGB.C.Mg.ha_siteSD = sd(AGB.C.Mg.ha))
+ 
+ggplot(data=AGB.trees.by.plot.D03, aes(x=siteID, y=AGB.C.Mg.ha, group = siteID, color=siteID)) + 
+  geom_point(size=1.5, alpha = 0.3, position = position_jitterdodge(dodge.width = 0.5))  +
+  geom_point(data = AGB.trees.by.plot.D03.summarise, aes(x = siteID, y = AGB.C.Mg.ha_siteAverage, group = siteID, color=siteID), size = 3.5, alpha = 0.8, position = position_dodge(width = 0.5)) +
+  geom_errorbar(data = AGB.trees.by.plot.D03.summarise, aes(x= siteID, y = AGB.C.Mg.ha_siteAverage, ymin = (AGB.C.Mg.ha_siteAverage-AGB.C.Mg.ha_siteSD), ymax = (AGB.C.Mg.ha_siteAverage+AGB.C.Mg.ha_siteSD), colour = siteID), width = 0.2) +
+        scale_color_brewer(name = "SiteID", palette = "Dark2") + #color-blind friendly
+        ggtitle("Tree Carbon Stocks by Site of D03") +
+        ylab("Carbon Stock (Mg/ha)") +
+        theme_classic(base_size = 16) +
+        theme(plot.title = element_text(size=16, hjust = 0.5),
+              axis.text.x=element_text(size=12, color = "black"),
+              axis.text.y=element_text(size=12),
+              axis.title.y=element_text(size=14), 
+              axis.title.x=element_blank(), 
+              legend.text=element_text(size=14),
+              legend.title=element_text(size=14),
+              legend.position = "none") 
+
+#Writing the joined dataframe into CSV file
+write.csv(AGB.trees.by.plot.D03, "AGB.trees.by.plot.D03.csv")
+
+```
+
+
+#DSNY -- Root Carbon Stocks
+##Create a chunk where you extract root biomass using NEON utilies package, get into environment, and write csvs into the environment
+```{r}
+
+# DSNY.roots <- loadByProduct(dpID="DP1.10067.001",
+# site=c("DSNY"),
+# startdate="2012-01", enddate="2024-12",
+# package="basic")
+# 
+# list2env(DSNY.roots, .GlobalEnv)
+# 
+# #readme_10067
+# write.csv(readme_10067, "readme_10067_DSNY.csv")
+# 
+# #bbc_percore
+# write.csv(bbc_percore, "bbc_percore_DSNY.csv")
+# 
+# #bbc_rootmass
+# write.csv(bbc_rootmass, "bbc_rootmass_DSNY.csv")
+# 
+# #variables_10067
+# write.csv(variables_10067, "variables_10067_DSNY.csv")
+
+```
+
+##Create chunk selecting variables to create new dfs for DSNY
+```{r}
+
+bbc_rootmass_DSNY <- read.csv("bbc_rootmass_DSNY.csv")
+bbc_percore_DSNY <- read.csv("bbc_percore_DSNY.csv")
+
+root.mass.DSNY <- bbc_rootmass_DSNY %>%
+select(domainID, plotID, sampleID, subsampleID, collectDate, sizeCategory, rootStatus, dryMass)
+
+root.core.DSNY <- bbc_percore_DSNY %>%
+ select(domainID, plotID, subplotID, sampleID, clipID, coreID, collectDate, rootSampleArea, rootSampleDepth, coreDiameter)
+
+
+root.data.DSNY <- left_join(root.mass.DSNY, root.core.DSNY)
+
+root.data.DSNY$year <- substr(root.data.DSNY$collectDate, start=1, stop=4) #extracting the year into a new variable / column
+
+```
+
+##Root calculations and conversions for DSNY
+```{r}
+
+roots.by.sample.DSNY <- root.data.DSNY %>% 
+  group_by(plotID, sampleID, rootSampleArea, rootSampleDepth) %>%
+  summarise(total.mass = sum(dryMass))
+
+roots.by.sample.DSNY.final <- roots.by.sample.DSNY %>%
+  mutate(root.gC.sample = (total.mass * 0.47)) %>%
+  mutate(root.gC.m2 = (root.gC.sample/rootSampleArea)) %>%
+  mutate(root.MgC.ha = (root.gC.m2 * 0.01))
+ 
+roots.by.plot.DSNY <- roots.by.sample.DSNY.final %>% 
+  group_by(plotID) %>%
+  summarise(mean.root.MgC.ha = mean(root.MgC.ha))
+
+```
+
+##Visualize the data for DSNY
+```{r}
+
+ggplot(data=roots.by.plot.DSNY, aes(x=plotID, y=mean.root.MgC.ha)) + 
+geom_jitter()+
+theme_classic()+
+theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+
+```
+
+#JERC -- Root Carbon Stocks
+##Create a chunk where you extract root biomass using NEON utilies package, get into environment, and write csvs into the environment
+```{r}
+
+# JERC.roots <- loadByProduct(dpID="DP1.10067.001",
+# site=c("JERC"),
+# startdate="2012-01", enddate="2024-12",
+# package="basic")
+# 
+# list2env(JERC.roots, .GlobalEnv)
+# 
+# #readme_10067
+# write.csv(readme_10067, "readme_10067_JERC.csv")
+# 
+# #bbc_percore
+# write.csv(bbc_percore, "bbc_percore_JERC.csv")
+# 
+# #bbc_rootmass
+# write.csv(bbc_rootmass, "bbc_rootmass_JERC.csv")
+# 
+# #variables_10067
+# write.csv(variables_10067, "variables_10067_JERC.csv")
+
+```
+
+##Create chunk selecting variables to create new dfs for JERC
+```{r}
+
+bbc_rootmass_JERC <- read.csv("bbc_rootmass_JERC.csv")
+bbc_percore_JERC <- read.csv("bbc_percore_JERC.csv")
+
+root.mass.JERC <- bbc_rootmass_JERC %>%
+select(domainID, plotID, sampleID, subsampleID, collectDate, sizeCategory, rootStatus, dryMass)
+
+root.core.JERC <- bbc_percore_JERC %>%
+ select(domainID, plotID, subplotID, sampleID, clipID, coreID, collectDate, rootSampleArea, rootSampleDepth, coreDiameter)
+
+
+root.data.JERC <- left_join(root.mass.JERC, root.core.JERC)
+
+root.data.JERC$year <- substr(root.data.JERC$collectDate, start=1, stop=4) #extracting year into a new variables
+
+```
+
+##Root calculations and conversions for JERC
+```{r}
+
+roots.by.sample.JERC <- root.data.JERC %>% 
+  group_by(plotID, sampleID, rootSampleArea, rootSampleDepth) %>%
+  summarise(total.mass = sum(dryMass))
+
+roots.by.sample.JERC.final <- roots.by.sample.JERC %>%
+  mutate(root.gC.sample = (total.mass * 0.47)) %>%
+  mutate(root.gC.m2 = (root.gC.sample/rootSampleArea)) %>%
+  mutate(root.MgC.ha = (root.gC.m2 * 0.01))
+ 
+roots.by.plot.JERC <- roots.by.sample.JERC.final %>% 
+  group_by(plotID) %>%
+  summarise(mean.root.MgC.ha = mean(root.MgC.ha))
+
+```
+
+##Visualize the data for JERC
+```{r}
+
+ggplot(data=roots.by.plot.JERC, aes(x=plotID, y=mean.root.MgC.ha)) + 
+geom_jitter()+
+theme_classic()+
+theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+
+```
+
+#OSBS -- Root Carbon Stocks
+##Create a chunk where you extract root biomass using NEON utilies package, get into environment, and write csvs into the environment
+```{r}
+# 
+# OSBS.roots <- loadByProduct(dpID="DP1.10067.001",
+# site=c("OSBS"),
+# startdate="2012-01", enddate="2024-12",
+# package="basic")
+# 
+#  list2env(OSBS.roots, .GlobalEnv)
+# 
+# #readme_10067
+# write.csv(readme_10067, "readme_10067_OSBS.csv")
+# 
+# #bbc_percore
+# write.csv(bbc_percore, "bbc_percore_OSBS.csv")
+# 
+# #bbc_rootmass
+# write.csv(bbc_rootmass, "bbc_rootmass_OSBS.csv")
+# 
+# #variables_10067
+# write.csv(variables_10067, "variables_10067_OSBS.csv")
+
+```
+
+##Create chunk selecting variables to create new dfs for OSBS
+```{r}
+
+bbc_rootmass_OSBS <- read.csv("bbc_rootmass_OSBS.csv")
+bbc_percore_OSBS <- read.csv("bbc_percore_OSBS.csv")
+
+root.mass.OSBS <- bbc_rootmass_OSBS %>%
+select(domainID, plotID, sampleID, subsampleID, collectDate, sizeCategory, rootStatus, dryMass)
+
+root.core.OSBS <- bbc_percore_OSBS %>%
+ select(domainID, plotID, subplotID, sampleID, clipID, coreID, collectDate, rootSampleArea, rootSampleDepth, coreDiameter)
+
+
+root.data.OSBS <- left_join(root.mass.OSBS, root.core.OSBS)
+
+root.data.OSBS$year <- substr(root.data.OSBS$collectDate, start=1, stop=4) 
+
+```
+
+##Root calculations and conversions for OSBS
+```{r}
+
+roots.by.sample.OSBS <- root.data.OSBS %>% 
+  group_by(plotID, sampleID, rootSampleArea, rootSampleDepth) %>%
+  summarise(total.mass = sum(dryMass))
+
+roots.by.sample.OSBS.final <- roots.by.sample.OSBS %>%
+  mutate(root.gC.sample = (total.mass * 0.47)) %>%
+  mutate(root.gC.m2 = (root.gC.sample/rootSampleArea)) %>%
+  mutate(root.MgC.ha = (root.gC.m2 * 0.01))
+ 
+roots.by.plot.OSBS <- roots.by.sample.OSBS.final %>% 
+  group_by(plotID) %>%
+  summarise(mean.root.MgC.ha = mean(root.MgC.ha))
+
+```
+
+##Visualize the data for OSBS
+```{r}
+
+ggplot(data=roots.by.plot.OSBS, aes(x=plotID, y=mean.root.MgC.ha)) + 
+geom_jitter()+
+theme_classic()+
+theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+
+```
+
+#Joining dataframes across D03 (Southeastern longleaf pine forests) for Tree Carbon Stocks
+```{r}
+
+# str(roots.by.plot.DSNY) #30 plots
+# str(roots.by.plot.JERC) #20 plots
+# str(roots.by.plot.OSBS) #20 plots
+
+roots.by.plot.D03 <- full_join(roots.by.plot.DSNY, roots.by.plot.JERC)
+roots.by.plot.D03 <- full_join(roots.by.plot.D03, roots.by.plot.OSBS)
+# str(roots.by.plot.D03) #70 plots over three sites
+```
+
+#Visualizing Root Carbon Stocks by site of D03
+```{r}
+
+roots.by.plot.D03$siteID <- str_sub(roots.by.plot.D03$plotID, 1, 4)
+
+roots.by.plot.D03.summarise <- roots.by.plot.D03 %>%
+ group_by(siteID) %>%
+ summarise(mean.root.MgC.ha_siteAverage = mean(mean.root.MgC.ha),
+           mean.root.MgC.ha_siteSD = sd(mean.root.MgC.ha)) 
+ 
+ggplot(data=roots.by.plot.D03, aes(x=siteID, y=mean.root.MgC.ha, group = siteID, color=siteID)) + 
+  geom_point(size=1.5, alpha = 0.3, position = position_jitterdodge(dodge.width = 0.5))  +
+  geom_point(data = roots.by.plot.D03.summarise, aes(x = siteID, y = mean.root.MgC.ha_siteAverage, group = siteID, color=siteID), size = 3.5, alpha = 0.8, position = position_dodge(width = 0.5)) +
+  geom_errorbar(data = roots.by.plot.D03.summarise, aes(x= siteID, y = mean.root.MgC.ha_siteAverage, ymin = (mean.root.MgC.ha_siteAverage-mean.root.MgC.ha_siteSD), ymax = (mean.root.MgC.ha_siteAverage+mean.root.MgC.ha_siteSD), colour = siteID), width = 0.2) +
+        scale_color_brewer(name = "SiteID", palette = "Dark2") + #color-blind friendly
+        ggtitle("Root Carbon Stocks by Site of D03") +
+        ylab("Carbon Stock (Mg/ha)") +
+        theme_classic(base_size = 16) +
+        theme(plot.title = element_text(size=16, hjust = 0.5),
+              axis.text.x=element_text(size=12, color = "black"),
+              axis.text.y=element_text(size=12),
+              axis.title.y=element_text(size=14), 
+              axis.title.x=element_blank(), 
+              legend.text=element_text(size=14),
+              legend.title=element_text(size=14),
+              legend.position = "none")
+
+#Writing the joined dataframe into CSV file
+write.csv(roots.by.plot.D03, "roots.by.plot.D03.csv")
+
+```
+
+
+#DSNY -- Soil Carbon Stocks
+
+##Downloading the data of interest from NEON, lising, and csvs
+```{r}												
+# DSNY.soil <- loadByProduct(dpID="DP1.10047.001",
+# site=c("DSNY"),
+# startdate="2012-01", enddate="2024-12",
+# package="basic")
+# 
+# list2env(DSNY.soil, .GlobalEnv)
+# 
+# #spc_biogeochem
+# write.csv(spc_biogeochem, "spc_biogeochem_DSNY.csv")
+# 
+# #spc_bulkdensity
+# write.csv(spc_bulkdensity, "spc_bulkdensity_DSNY.csv")
+```
+
+To quantify soil carbon stocks, we need bulk density and % carbon values for each soil increment. Inconveniently, NEON does not put these variables into the same data set, so we need to perform some carpentry. All the steps below are similar to what you performed with trees and roots. Bulk density will also be necessary for calculating the inorganic nitrogen pool and scaling it up to the plot level!
+
+##Select variables and carpentry to create depth increment (associated with 1a-3d from soil NEON activity) for DSNY
+```{r}											
+spc_biogeochem_DSNY <- read.csv("spc_biogeochem_DSNY.csv")
+spc_bulkdensity_DSNY <- read.csv("spc_bulkdensity_DSNY.csv")
+
+#making a new dataframe with selected variables
+biogeochem.info.DSNY <- spc_biogeochem_DSNY %>%
+select(domainID, siteID, plotID, collectDate, horizonID, horizonName, biogeoTopDepth, biogeoBottomDepth, carbonTot)
+
+#making a new dataframe with selected variables
+bulkdensity.info.DSNY <- spc_bulkdensity_DSNY %>%
+select(domainID, siteID, plotID, collectDate, horizonID, horizonName, bulkDensThirdBar, bulkDensFieldMoist)
+
+soil.data.DSNY <- left_join(biogeochem.info.DSNY, bulkdensity.info.DSNY)
+#str(soil.data.DSNY) #70 observations, 11 variables
+
+soil.data.DSNY <- soil.data.DSNY %>%
+mutate(depth_increment = biogeoBottomDepth-biogeoTopDepth)
+
+#str(soil.data.DSNY) #70 observations, 12 variables
+```
+
+##GAP FILL for DSNY -- using bulkDensFieldMoist as primary for gap filling since is has no NAs
+View your data frame again. Notice how many NAs there are for the bulk density variable! This is a common problem—bulk density measures are rare. We will deal with this issue by ‘gap filling’.
+```{r}
+sum(is.na(soil.data.DSNY$bulkDensThirdBar)) #70 observations for NA, so completely empty
+sum(is.na(soil.data.DSNY$bulkDensFieldMoist)) #0 observations for NA
+
+#(2)	First calculate the mean bulk density (using bulkDensFieldMoist, since it’s more abundant) for each plot and then for each site. Perform the following steps:
+
+#(a) Use mutate to create a new variable in your existing dataframe of the mean bulk density of each plot. 
+soil.data.DSNY <- soil.data.DSNY %>% 
+ group_by(plotID) %>% 
+ mutate(BD.plot.mean = mean(bulkDensFieldMoist, na.rm=TRUE))
+# View(soil.data.DSNY)
+
+#(b)	Use mutate to calculate the mean bulk density of each site. Use similar steps as above, but group by siteID instead of plotID.
+soil.data.DSNY <- soil.data.DSNY %>% 
+ group_by(siteID) %>% 
+ mutate(BD.site.mean = mean(bulkDensFieldMoist, na.rm=TRUE))
+# View(soil.data.DSNY)
+
+#(3)	Gap fill using if_else to fill in values from bulkDensFieldMoist where bulkDensThirdBar is absent. Use this logic: if the NEON provided bulk density from third bar method is NA, apply the value from the FieldMoist method to the new variable ‘bulkdensity’, else, apply the ThirdBar value to the new variable ‘bulkdensity’.
+
+soil.data.DSNY <- soil.data.DSNY %>% 
+group_by(plotID) %>% 
+mutate(bulkdensity = if_else(is.na(bulkDensThirdBar), bulkDensFieldMoist , bulkDensThirdBar))
+
+sum(is.na(soil.data.DSNY$bulkdensity)) #how many NAs? 0, meaning that there was an observation for each plot using FieldMoist, which makes sense based on above
+
+#######NOTE, at this point for DSNY, gap filling complete, so rest of steps commented out
+
+# #(4)	If you still have NAs use the following steps to backfill using this logic: if the NEON provided bulk density value is NA, apply the plot-level mean to the variable ‘bulkdensity’, else, apply the NEON provide value to the variable ‘bulkdensity’.
+# 
+# soil.data.DSNY <- soil.data.DSNY %>%
+# group_by(plotID) %>%
+# mutate(bulkdensity = if_else(is.na(bulkdensity), BD.plot.mean, bulkdensity))
+# 
+# sum(is.na(soil.data.DSNY$bulkdensity)) #how many NAs? 0
+# 
+# #(5) Gap fill again with site-level mean. Use the if_else approach with this logic: if the new bulkdensity variable is NA, apply the site-level mean to the variable ‘bulkdensity,’ else apply the value already given to ‘bulkdensity’.
+# 
+# soil.data.DSNY <- soil.data.DSNY %>%
+# group_by(plotID) %>%
+# mutate(bulkdensity = if_else(is.na(bulkdensity), BD.site.mean, bulkdensity))
+# 
+# sum(is.na(soil.data.DSNY$bulkdensity)) #how many NAs? 0
+# 
+# # View(soil.data.DSNY)
+
+```
+
+##Calculate the soil carbon stock for DSNY
+```{r}
+#(1)	Given bulk density and the depth increment of each horizon in your dataframe, create a new column in your dataframe that is the total amount of soil in grams for a m^2 area
+
+#(a-d)	To do this, go back to your HSB code and notice how we calculated the sample volume for each depth increment. We used a m2 area, so use 100 cm x 100 cm  = 10,000 cm2 for the sample area in this case too.
+
+soil.data.DSNY <- soil.data.DSNY %>% 
+  mutate(sample.area.cm2 = 10000) %>%
+  mutate(sample.volume = sample.area.cm2*depth_increment) %>%  #created an arbitrary variable of 10,000 cm2 that represents 1 m2 and then multiplying by the depth increment we calculated above to try to get volume, which will be now in cm3
+  mutate(g_soil = sample.volume*bulkdensity) %>% #this is in g/m2
+  mutate(kg_m2_soil = g_soil/1000) #should now be in kg/m2
+
+#what are the units of carbonTots? According to variables_10047, units are gramsPerKilogram, g/kg
+
+#(e-f) Calculate the total carbon by each depth increment... not using increment directly, but essentially using the kilograms per m2 of soil calculated above, since that represents the kilograms of soil at a given depth_increment within a m2 area.
+soil.data.DSNY <- soil.data.DSNY %>% 
+  mutate(carbon_stock_forDepth = carbonTot*kg_m2_soil) #units in g/m2
+
+#(g-h) Create a new dataframe that sums the carbon stock of all the depth increments
+soil.data.sum.DSNY <- soil.data.DSNY %>% 
+  group_by(plotID, siteID) %>%
+  summarise(total.carbon = sum(carbon_stock_forDepth))
+
+#(h) Convert to Mg C per ha
+soil.data.sum.DSNY <- soil.data.sum.DSNY %>% 
+  mutate(soil.C.Mg.ha = (total.carbon*0.01))
+  
+#(i) Visualize the data
+ggplot(data=soil.data.sum.DSNY, aes(x=plotID, y=soil.C.Mg.ha)) + 
+geom_jitter()+
+theme_classic()+
+theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+
+
+```
+
+
+#JERC -- Soil Carbon Stocks
+##Downloading the data of interest from NEON, lising, and csvs
+```{r}												
+ # JERC.soil <- loadByProduct(dpID="DP1.10047.001",
+ # site=c("JERC"),
+ # startdate="2012-01", enddate="2024-12",
+ # package="basic")
+ # 
+ # list2env(JERC.soil, .GlobalEnv)
+ # 
+ # #spc_biogeochem
+ # write.csv(spc_biogeochem, "spc_biogeochem_JERC.csv")
+ # 
+ # #spc_bulkdensity
+ # write.csv(spc_bulkdensity, "spc_bulkdensity_JERC.csv")
+```
+
+To quantify soil carbon stocks, we need bulk density and % carbon values for each soil increment. Inconveniently, NEON does not put these variables into the same data set, so we need to perform some carpentry. All the steps below are similar to what you performed with trees and roots. Bulk density will also be necessary for calculating the inorganic nitrogen pool and scaling it up to the plot level!
+
+##Select variables and carpentry to create depth increment (associated with 1a-3d from soil NEON activity) for JERC
+```{r}											
+spc_biogeochem_JERC <- read.csv("spc_biogeochem_JERC.csv")
+spc_bulkdensity_JERC <- read.csv("spc_bulkdensity_JERC.csv")
+
+#making a new dataframe with selected variables
+biogeochem.info.JERC <- spc_biogeochem_JERC %>%
+select(domainID, siteID, plotID, collectDate, horizonID, horizonName, biogeoTopDepth, biogeoBottomDepth, carbonTot)
+
+#making a new dataframe with selected variables
+bulkdensity.info.JERC <- spc_bulkdensity_JERC %>%
+select(domainID, siteID, plotID, collectDate, horizonID, horizonName, bulkDensThirdBar, bulkDensFieldMoist)
+
+soil.data.JERC <- left_join(biogeochem.info.JERC, bulkdensity.info.JERC)
+# str(soil.data.JERC) #103 observations, 11 variables
+
+soil.data.JERC <- soil.data.JERC %>%
+mutate(depth_increment = biogeoBottomDepth-biogeoTopDepth)
+
+# str(soil.data.JERC) #103 observations, 12 variables
+```
+
+##GAP FILL for JERC -- using bulkDensFieldMoist as primary for gap filling since it has the least NAs
+View your data frame again. Notice how many NAs there are for the bulk density variable! This is a common problem—bulk density measures are rare. We will deal with this issue by ‘gap filling’.
+```{r}
+sum(is.na(soil.data.JERC$bulkDensThirdBar)) #103 observations for NA
+sum(is.na(soil.data.JERC$bulkDensFieldMoist)) #11 observations for NA, this is the most complete, so we are using this as the primary metric for gap filling
+
+#(2)	First calculate the mean bulk density (using bulkDensFieldMoist, since it’s more abundant) for each plot and then for each site. Perform the following steps:
+
+#(a) Use mutate to create a new variable in your existing dataframe of the mean bulk density of each plot. 
+soil.data.JERC <- soil.data.JERC %>% 
+ group_by(plotID) %>% 
+ mutate(BD.plot.mean = mean(bulkDensFieldMoist, na.rm=TRUE))
+# View(soil.data.JERC)
+
+#(b)	Use mutate to calculate the mean bulk density of each site. Use similar steps as above, but group by siteID instead of plotID.
+soil.data.JERC <- soil.data.JERC %>% 
+ group_by(siteID) %>% 
+ mutate(BD.site.mean = mean(bulkDensFieldMoist, na.rm=TRUE))
+# View(soil.data.JERC)
+
+#(3)	Gap fill using if_else to fill in values from bulkDensFieldMoist where bulkDensThirdBar is absent. Use this logic: if the NEON provided bulk density from third bar method is NA, apply the value from the FieldMoist method to the new variable ‘bulkdensity’, else, apply the ThirdBar value to the new variable ‘bulkdensity’.
+
+soil.data.JERC <- soil.data.JERC %>% 
+group_by(plotID) %>% 
+mutate(bulkdensity = if_else(is.na(bulkDensThirdBar), bulkDensFieldMoist , bulkDensThirdBar))
+
+sum(is.na(soil.data.JERC$bulkdensity)) #how many NAs? 11, so there are still 11 observations
+
+#(4)	If you still have NAs use the following steps to backfill using this logic: if the NEON provided bulk density value is NA, apply the plot-level mean to the variable ‘bulkdensity’, else, apply the NEON provide value to the variable ‘bulkdensity’.
+
+soil.data.JERC <- soil.data.JERC %>%
+group_by(plotID) %>%
+mutate(bulkdensity = if_else(is.na(bulkdensity), BD.plot.mean, bulkdensity))
+
+sum(is.na(soil.data.JERC$bulkdensity)) #how many NAs? 11, so there are still 11 observations
+
+#(5) Gap fill again with site-level mean. Use the if_else approach with this logic: if the new bulkdensity variable is NA, apply the site-level mean to the variable ‘bulkdensity,’ else apply the value already given to ‘bulkdensity’.
+
+soil.data.JERC <- soil.data.JERC %>%
+group_by(plotID) %>%
+mutate(bulkdensity = if_else(is.na(bulkdensity), BD.site.mean, bulkdensity))
+
+sum(is.na(soil.data.JERC$bulkdensity)) #how many NAs? 0
+
+# View(soil.data.JERC)
+
+```
+
+##Calculate the soil carbon stock for JERC
+```{r}
+#(1)	Given bulk density and the depth increment of each horizon in your dataframe, create a new column in your dataframe that is the total amount of soil in grams for a m^2 area
+
+#(a-d)	To do this, go back to your HSB code and notice how we calculated the sample volume for each depth increment. We used a m2 area, so use 100 cm x 100 cm  = 10,000 cm2 for the sample area in this case too.
+
+soil.data.JERC <- soil.data.JERC %>% 
+  mutate(sample.area.cm2 = 10000) %>%
+  mutate(sample.volume = sample.area.cm2*depth_increment) %>%  #created an arbitrary variable of 10,000 cm2 that represents 1 m2 and then multiplying by the depth increment we calculated above to try to get volume, which will be now in cm3
+  mutate(g_soil = sample.volume*bulkdensity) %>% #this is in g/m2
+  mutate(kg_m2_soil = g_soil/1000) #should now be in kg/m2
+
+#what are the units of carbonTots? According to variables_10047, units are gramsPerKilogram, g/kg
+
+#(e-f) Calculate the total carbon by each depth increment... not using increment directly, but essentially using the kilograms per m2 of soil calculated above, since that represents the kilograms of soil at a given depth_increment within a m2 area.
+soil.data.JERC <- soil.data.JERC %>% 
+  mutate(carbon_stock_forDepth = carbonTot*kg_m2_soil) #units in g/m2
+
+#(g-h) Create a new dataframe that sums the carbon stock of all the depth increments
+soil.data.sum.JERC <- soil.data.JERC %>% 
+  group_by(plotID, siteID) %>%
+  summarise(total.carbon = sum(carbon_stock_forDepth))
+
+#(h) Convert to Mg C per ha
+soil.data.sum.JERC <- soil.data.sum.JERC %>% 
+  mutate(soil.C.Mg.ha = (total.carbon*0.01))
+  
+#(i) Visualize the data
+ggplot(data=soil.data.sum.JERC, aes(x=plotID, y=soil.C.Mg.ha)) + 
+geom_jitter()+
+theme_classic()+
+theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+
+
+```
+
+#OSBS -- Soil Carbon Stocks
+##Downloading the data of interest from NEON, lising, and csvs
+```{r}												
+# OSBS.soil <- loadByProduct(dpID="DP1.10047.001",
+# site=c("OSBS"),
+# startdate="2012-01", enddate="2024-12",
+# package="basic")
+# 
+# list2env(OSBS.soil, .GlobalEnv)
+# 
+# #spc_biogeochem
+# write.csv(spc_biogeochem, "spc_biogeochem_OSBS.csv")
+# 
+# #spc_bulkdensity
+# write.csv(spc_bulkdensity, "spc_bulkdensity_OSBS.csv")
+```
+
+To quantify soil carbon stocks, we need bulk density and % carbon values for each soil increment. Inconveniently, NEON does not put these variables into the same data set, so we need to perform some carpentry. All the steps below are similar to what you performed with trees and roots. Bulk density will also be necessary for calculating the inorganic nitrogen pool and scaling it up to the plot level!
+
+##Select variables and carpentry to create depth increment (associated with 1a-3d from soil NEON activity) for OSBS
+```{r}											
+spc_biogeochem_OSBS <- read.csv("spc_biogeochem_OSBS.csv")
+spc_bulkdensity_OSBS <- read.csv("spc_bulkdensity_OSBS.csv")
+
+#making a new dataframe with selected variables
+biogeochem.info.OSBS <- spc_biogeochem_OSBS %>%
+select(domainID, siteID, plotID, collectDate, horizonID, horizonName, biogeoTopDepth, biogeoBottomDepth, carbonTot)
+
+#making a new dataframe with selected variables
+bulkdensity.info.OSBS <- spc_bulkdensity_OSBS %>%
+select(domainID, siteID, plotID, collectDate, horizonID, horizonName, bulkDensThirdBar, bulkDensFieldMoist)
+
+soil.data.OSBS <- left_join(biogeochem.info.OSBS, bulkdensity.info.OSBS)
+# str(soil.data.OSBS) #80 observations, 11 variables
+
+soil.data.OSBS <- soil.data.OSBS %>%
+mutate(depth_increment = biogeoBottomDepth-biogeoTopDepth)
+
+# str(soil.data.OSBS) #80 observations, 12 variables
+```
+
+##GAP FILL for OSBS -- using bulkDensFieldMoist as primary for gap filling since it has the least NAs
+View your data frame again. Notice how many NAs there are for the bulk density variable! This is a common problem—bulk density measures are rare. We will deal with this issue by ‘gap filling’.
+```{r}
+sum(is.na(soil.data.OSBS$bulkDensThirdBar)) #80 observations for NA
+sum(is.na(soil.data.OSBS$bulkDensFieldMoist)) #15 observations for NA
+
+#(2)	First calculate the mean bulk density (using bulkDensFieldMoist, since it’s more abundant) for each plot and then for each site. Perform the following steps:
+
+#(a) Use mutate to create a new variable in your existing dataframe of the mean bulk density of each plot. 
+soil.data.OSBS <- soil.data.OSBS %>% 
+ group_by(plotID) %>% 
+ mutate(BD.plot.mean = mean(bulkDensFieldMoist, na.rm=TRUE))
+#View(soil.data.OSBS)
+
+#(b)	Use mutate to calculate the mean bulk density of each site. Use similar steps as above, but group by siteID instead of plotID.
+soil.data.OSBS <- soil.data.OSBS %>% 
+ group_by(siteID) %>% 
+ mutate(BD.site.mean = mean(bulkDensFieldMoist, na.rm=TRUE))
+#View(soil.data.OSBS)
+
+#(3)	Gap fill using if_else to fill in values from bulkDensFieldMoist where bulkDensThirdBar is absent. Use this logic: if the NEON provided bulk density from third bar method is NA, apply the value from the FieldMoist method to the new variable ‘bulkdensity’, else, apply the ThirdBar value to the new variable ‘bulkdensity’.
+
+soil.data.OSBS <- soil.data.OSBS %>% 
+group_by(plotID) %>% 
+mutate(bulkdensity = if_else(is.na(bulkDensThirdBar), bulkDensFieldMoist , bulkDensThirdBar))
+
+sum(is.na(soil.data.OSBS$bulkdensity)) #how many NAs? 15
+
+#(4)	If you still have NAs use the following steps to backfill using this logic: if the NEON provided bulk density value is NA, apply the plot-level mean to the variable ‘bulkdensity’, else, apply the NEON provide value to the variable ‘bulkdensity’.
+
+soil.data.OSBS <- soil.data.OSBS %>%
+group_by(plotID) %>%
+mutate(bulkdensity = if_else(is.na(bulkdensity), BD.plot.mean, bulkdensity))
+
+sum(is.na(soil.data.OSBS$bulkdensity)) #how many NAs? 11
+
+#(5) Gap fill again with site-level mean. Use the if_else approach with this logic: if the new bulkdensity variable is NA, apply the site-level mean to the variable ‘bulkdensity,’ else apply the value already given to ‘bulkdensity’.
+
+soil.data.OSBS <- soil.data.OSBS %>%
+group_by(plotID) %>%
+mutate(bulkdensity = if_else(is.na(bulkdensity), BD.site.mean, bulkdensity))
+
+sum(is.na(soil.data.OSBS$bulkdensity)) #how many NAs? 0
+
+# View(soil.data.OSBS)
+
+```
+
+
+##Calculate the soil carbon stock for OSBS
+```{r}
+#(1)	Given bulk density and the depth increment of each horizon in your dataframe, create a new column in your dataframe that is the total amount of soil in grams for a m^2 area
+
+#(a-d)	To do this, go back to your HSB code and notice how we calculated the sample volume for each depth increment. We used a m2 area, so use 100 cm x 100 cm  = 10,000 cm2 for the sample area in this case too.
+
+soil.data.OSBS <- soil.data.OSBS %>% 
+  mutate(sample.area.cm2 = 10000) %>%
+  mutate(sample.volume = sample.area.cm2*depth_increment) %>%  #created an arbitrary variable of 10,000 cm2 that represents 1 m2 and then multiplying by the depth increment we calculated above to try to get volume, which will be now in cm3
+  mutate(g_soil = sample.volume*bulkdensity) %>% #this is in g/m2
+  mutate(kg_m2_soil = g_soil/1000) #should now be in kg/m2
+
+#what are the units of carbonTots? According to variables_10047, units are gramsPerKilogram, g/kg
+
+#(e-f) Calculate the total carbon by each depth increment... not using increment directly, but essentially using the kilograms per m2 of soil calculated above, since that represents the kilograms of soil at a given depth_increment within a m2 area.
+soil.data.OSBS <- soil.data.OSBS %>% 
+  mutate(carbon_stock_forDepth = carbonTot*kg_m2_soil) #units in g/m2
+
+#(g-h) Create a new dataframe that sums the carbon stock of all the depth increments
+soil.data.sum.OSBS <- soil.data.OSBS %>% 
+  group_by(plotID, siteID) %>%
+  summarise(total.carbon = sum(carbon_stock_forDepth))
+
+#(h) Convert to Mg C per ha
+soil.data.sum.OSBS <- soil.data.sum.OSBS %>% 
+  mutate(soil.C.Mg.ha = (total.carbon*0.01))
+  
+  
+#(i) Visualize the data
+ggplot(data=soil.data.sum.OSBS, aes(x=plotID, y=soil.C.Mg.ha)) + 
+geom_jitter()+
+theme_classic()+
+theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+
+
+```
+
+#Joining dataframes across D03 (Southeastern longleaf pine forests) for Soil Carbon Stocks
+```{r}
+
+str(soil.data.sum.DSNY) #16 plots
+str(soil.data.sum.JERC) #23 plots
+str(soil.data.sum.OSBS) #23 plots
+
+soil.by.plot.D03 <- full_join(soil.data.sum.DSNY, soil.data.sum.JERC) #39 plots
+soil.by.plot.D03 <- full_join(soil.by.plot.D03, soil.data.sum.OSBS)
+str(soil.by.plot.D03) #62 plots, correctly joined!
+```
+
+#Visualizing Soil Carbon Stocks by site of D03
+```{r}
+
+soil.by.plot.D03.summarise <- soil.by.plot.D03 %>%
+ group_by(siteID) %>%
+ summarise(soil.C.Mg.ha_siteAverage = mean(soil.C.Mg.ha),
+           soil.C.Mg.ha_siteSD = sd(soil.C.Mg.ha)) 
+ 
+ggplot(data=soil.by.plot.D03, aes(x=siteID, y=soil.C.Mg.ha, group = siteID, color=siteID)) + 
+  geom_point(size=1.5, alpha = 0.3, position = position_jitterdodge(dodge.width = 0.5))  +
+  geom_point(data = soil.by.plot.D03.summarise, aes(x = siteID, y = soil.C.Mg.ha_siteAverage, group = siteID, color=siteID), size = 3.5, alpha = 0.8, position = position_dodge(width = 0.5)) +
+  geom_errorbar(data = soil.by.plot.D03.summarise, aes(x= siteID, y = soil.C.Mg.ha_siteAverage, ymin = (soil.C.Mg.ha_siteAverage-soil.C.Mg.ha_siteSD), ymax = (soil.C.Mg.ha_siteAverage+soil.C.Mg.ha_siteSD), colour = siteID), width = 0.2) +
+        scale_color_brewer(name = "SiteID", palette = "Dark2") + #color-blind friendly
+        ggtitle("Soil Carbon Stocks by Site of D03") +
+        ylab("Carbon Stock (Mg/ha)") +
+        theme_classic(base_size = 16) +
+        theme(plot.title = element_text(size=16, hjust = 0.5),
+              axis.text.x=element_text(size=12, color = "black"),
+              axis.text.y=element_text(size=12),
+              axis.title.y=element_text(size=14), 
+              axis.title.x=element_blank(), 
+              legend.text=element_text(size=14),
+              legend.title=element_text(size=14),
+              legend.position = "none")
+
+
+#Writing the joined dataframe into CSV file
+write.csv(soil.by.plot.D03, "soil.by.plot.D03.csv")
+
+```
+
+#Merging three coallated dataframes for D03 regions into one (let us also see how much overlap between plots for soil, trees, and roots are, if any...)
+```{r}
+
+D03.carbon.merged.step1.df <- full_join(AGB.trees.by.plot.D03, roots.by.plot.D03) #confirmed only joining by siteID and plotID
+D03.carbon.merged.df <- full_join(D03.carbon.merged.step1.df, soil.by.plot.D03) #confirmed only joining by siteID and plotID
+#str(D03.carbon.merged.df)
+write.csv(D03.carbon.merged.df, "D03.carbon.merged.csv")
+
+```
+
+#D03 Domain -- Inorganic Nitrogen Stocks
+##Read in csv for nitrogen dataframe
+Notably, the Inorganic nitrogen metric provided through the neonNTrans package includes nitrite, which we are not as interested in, but some micorbes being able to utilize it as an intermediate. We could not a clearly identifiable way to isolate nitrate from nitrite with the available data.
+```{r}
+data.summary.D03 <- read.csv("datasummary.D03.csv")
+str(data.summary.D03) #370 observations
+```
+
+
+##Data carpentry for the nitrogen dataframe to add variables of siteID and plotID
+```{r}
+# Creating variable for siteID aand soil horizon s an independent variable in the dataframe by duplicating sample ID, subsetting the string, separating by the hyphen, and adding back to the original dataframe
+data.summary.D03$siteID = substr(data.summary.D03$sampleID, 1,4)
+data.summary.D03$siteID_tosplit = substr(data.summary.D03$sampleID, 1,10)
+hold.name <- strsplit(data.summary.D03$siteID_tosplit, split="-")
+hold.name.df <- as.data.frame(matrix(unlist(hold.name), ncol=2, byrow=T))
+colnames(hold.name.df) <- c("plotID", "soilHorizon")
+data.summary.D03$plotID <- hold.name.df$plotID
+data.summary.D03$soilHorizon <- hold.name.df$soilHorizon
+
+write.csv(data.summary.D03, "data.summary.D03_outputV2.csv")
+```
+
+
+##Exploratory visualization of different variables in nitrogen dataframe for D03
+###By site and plot
+```{r}
+data.summary.D03.DSNY <- data.summary.D03 %>%
+  filter(siteID == "DSNY")
+data.summary.D03.JERC <- data.summary.D03 %>%
+  filter(siteID == "JERC")
+data.summary.D03.OSBS <- data.summary.D03 %>%
+  filter(siteID == "OSBS")
+
+exploratory.InorgN.DSNY.plot <- ggplot(data=data.summary.D03.DSNY, aes(x=plotID, y=soilInorganicNugPerGram)) + 
+  geom_point(size=1.5, alpha = 1)  +
+        #scale_color_brewer(name = "SiteID", palette = "Dark2") + #color-blind friendly
+        ggtitle("Average Soil Inorganic N by Plot within DSNY of D03") +
+       #scale_y_continuous(breaks = seq(0, 100, 10), limits = c(-15, 100)) +
+        ylab("Inorganic N (mcg/g)") +
+     geom_jitter() +
+    theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+exploratory.InorgN.DSNY.plot
+
+exploratory.InorgN.JERC.plot <- ggplot(data=data.summary.D03.JERC, aes(x=plotID, y=soilInorganicNugPerGram)) + 
+  geom_point(size=1.5, alpha = 1)  +
+        #scale_color_brewer(name = "SiteID", palette = "Dark2") + #color-blind friendly
+        ggtitle("Average Soil Inorganic N by Plot within JERC of D03") +
+       #scale_y_continuous(breaks = seq(0, 100, 10), limits = c(-15, 100)) +
+        ylab("Inorganic N (mcg/g)") +
+     geom_jitter() +
+    theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+exploratory.InorgN.JERC.plot
+
+exploratory.InorgN.OSBSplot <- ggplot(data=data.summary.D03.OSBS, aes(x=plotID, y=soilInorganicNugPerGram)) + 
+  geom_point(size=1.5, alpha = 1)  +
+        #scale_color_brewer(name = "SiteID", palette = "Dark2") + #color-blind friendly
+        ggtitle("Average Soil Inorganic N by Plot within OSBS of D03") +
+       #scale_y_continuous(breaks = seq(0, 100, 10), limits = c(-15, 100)) +
+        ylab("Inorganic N (mcg/g)") +
+     geom_jitter() +
+    theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+exploratory.InorgN.OSBSplot
+
+
+```
+###Figures for Inorganic N, Ammonium, N Mineralization
+```{r}
+
+# Initial visualization of data for Inorganic N
+data.summary.D03.Exploratory <- data.summary.D03 %>%
+ group_by(siteID) %>%
+ summarise(soilInorganicNugPerGram_average = mean(soilInorganicNugPerGram),
+           soilInorganicNugPerGram_sd = sd(soilInorganicNugPerGram))
+
+exploratory.InorgN.D03 <- ggplot(data=data.summary.D03, aes(x=siteID, y=soilInorganicNugPerGram, group = siteID, color=siteID)) + 
+  geom_point(size=1.5, alpha = 0.3, position = position_jitterdodge(dodge.width = 0.5))  +
+  geom_point(data = data.summary.D03.Exploratory, aes(x = siteID, y = soilInorganicNugPerGram_average, group = siteID, color=siteID), size = 3.5, alpha = 0.8, position = position_dodge(width = 0.5)) +
+  geom_errorbar(data = data.summary.D03.Exploratory, aes(x= siteID, y = soilInorganicNugPerGram_average, ymin = (soilInorganicNugPerGram_average-soilInorganicNugPerGram_sd), ymax = (soilInorganicNugPerGram_average+soilInorganicNugPerGram_sd), colour = siteID), width = 0.2) +
+        scale_color_brewer(name = "SiteID", palette = "Dark2") + #color-blind friendly
+        ggtitle("Average Soil Inorganic N (ug/gram) by Site of D03") +
+       #scale_y_continuous(breaks = seq(0, 100, 10), limits = c(-15, 100)) +
+        ylab("Inorganic N (mcg/g)") +
+        theme_classic(base_size = 16) +
+        theme(plot.title = element_text(size=16, hjust = 0.5),
+              axis.text.x=element_text(size=12, color = "black"),
+              axis.text.y=element_text(size=12),
+              axis.title.y=element_text(size=14), 
+              axis.title.x=element_blank(), 
+              legend.text=element_text(size=14),
+              legend.title=element_text(size=14),
+              legend.position = "none")
+
+# Initial visualization of data for Ammonium
+data.summary.D03.Exploratory.NH4 <- data.summary.D03 %>%
+ group_by(siteID) %>%
+ summarise(soilAmmoniumNugPerGram_average = mean(soilAmmoniumNugPerGram),
+           soilAmmoniumNugPerGram_sd = sd(soilAmmoniumNugPerGram))
+
+exploratory.ammonium.D03 <- ggplot(data=data.summary.D03, aes(x=siteID, y=soilAmmoniumNugPerGram, group = siteID, color=siteID)) + 
+  geom_point(size=1.5, alpha = 0.3, position = position_jitterdodge(dodge.width = 0.5))  +
+  geom_point(data = data.summary.D03.Exploratory.NH4, aes(x = siteID, y = soilAmmoniumNugPerGram_average, group = siteID, color=siteID), size = 3.5, alpha = 0.8, position = position_dodge(width = 0.5)) +
+  geom_errorbar(data = data.summary.D03.Exploratory.NH4, aes(x= siteID, y = soilAmmoniumNugPerGram_average, ymin = (soilAmmoniumNugPerGram_average-soilAmmoniumNugPerGram_sd), ymax = (soilAmmoniumNugPerGram_average+soilAmmoniumNugPerGram_sd), colour = siteID), width = 0.2) +
+        scale_color_brewer(name = "SiteID", palette = "Dark2") + #color-blind friendly
+        ggtitle("Average Soil Ammonium (ug/gram) by Site of D03") +
+       #scale_y_continuous(breaks = seq(-10, 80, 10), limits = c(-10, 65)) +
+      scale_y_break(c(32, 48)) +
+        ylab("Ammonium (mcg/g)") +
+        theme_classic(base_size = 16) +
+        theme(plot.title = element_text(size=16, hjust = 0.5),
+              axis.text.x=element_text(size=12, color = "black"),
+              axis.text.y=element_text(size=12),
+              axis.title.y=element_text(size=14), 
+              axis.title.x=element_blank(), 
+              axis.text.y.right = element_blank(), #deals with weird ggbreak glitch
+              axis.line.y.right = element_blank(), #deals with weird ggbreak glitch
+              axis.ticks.y.right = element_blank(), #deals with weird ggbreak glitch
+              legend.text=element_text(size=14),
+              legend.title=element_text(size=14),
+              legend.position = "none")
+
+exploratory.InorgN.D03
+exploratory.ammonium.D03
+
+# Initial visualization of data for Mineralization
+data.summary.D03.Exploratory.Mineralization <- data.summary.D03 %>%
+ group_by(siteID) %>%
+ summarise(netNminugPerGramPerDay_average = mean(netNminugPerGramPerDay), #averaging a rate, always messes with my head if appropriately statistically
+           netNminugPerGramPerDay_sd = sd(netNminugPerGramPerDay))
+
+exploratory.mineralization.D03 <- ggplot(data=data.summary.D03, aes(x=siteID, y=netNminugPerGramPerDay, group = siteID, color=siteID)) + 
+  geom_point(size=1.5, alpha = 0.3, position = position_jitterdodge(dodge.width = 0.5))  +
+  geom_point(data = data.summary.D03.Exploratory.Mineralization, aes(x = siteID, y = netNminugPerGramPerDay_average, group = siteID, color=siteID), size = 3.5, alpha = 0.8, position = position_dodge(width = 0.5)) +
+  geom_errorbar(data = data.summary.D03.Exploratory.Mineralization, aes(x= siteID, y = netNminugPerGramPerDay_average, ymin = (netNminugPerGramPerDay_average-netNminugPerGramPerDay_sd), ymax = (netNminugPerGramPerDay_average+netNminugPerGramPerDay_sd), colour = siteID), width = 0.2) +
+        scale_color_brewer(name = "SiteID", palette = "Dark2") + #color-blind friendly
+        ggtitle("Average Soil N Mineralization rate ((ug/gram)/day) by Site of D03") +
+       #scale_y_continuous(breaks = seq(-10, 80, 10), limits = c(-10, 65)) +
+     # scale_y_break(c(32, 48)) +
+        ylab("Mineralization ((mcg/g)/day)") +
+        theme_classic(base_size = 16) +
+        theme(plot.title = element_text(size=16, hjust = 0.5),
+              axis.text.x=element_text(size=12, color = "black"),
+              axis.text.y=element_text(size=12),
+              axis.title.y=element_text(size=14), 
+              axis.title.x=element_blank(), 
+             #axis.text.y.right = element_blank(), #deals with weird ggbreak glitch
+              #axis.line.y.right = element_blank(), #deals with weird ggbreak glitch
+              #axis.ticks.y.right = element_blank(), #deals with weird ggbreak glitch
+              legend.text=element_text(size=14),
+              legend.title=element_text(size=14),
+              legend.position = "none")
+
+exploratory.mineralization.D03 #note, getting a missing values warning
+```
+
+
+##Data carpentry for Inorganic Nitrogen (joining for D03 domain, bulk density plot/site means, gapfilling, upscaling of inorganic nitrogen variable to kg/ha)
+```{r}
+D03.nitrogen.df <- read.csv("data.summary.D03_outputV2.csv")
+str(D03.nitrogen.df) #370 observations
+
+
+str(soil.data.DSNY) #70
+str(soil.data.JERC) #103
+str(soil.data.OSBS) #80
+
+#Joining the soil data constructed above into a D03 domain dataframe
+soil.data.D03.join1 <- full_join(soil.data.DSNY, soil.data.JERC)
+soil.data.D03.all <- full_join(soil.data.D03.join1, soil.data.OSBS)
+str(soil.data.D03.all) #looks like it adds up at 253
+
+#Okay, I want to extract bulk density averaged at the plot level to join onto to nitrogen dataframe...
+soil.data.D03.all.BDmeans.plots <- soil.data.D03.all %>%
+  distinct(siteID, plotID, BD.plot.mean) %>%
+  filter(!is.nan(BD.plot.mean))
+
+soil.data.D03.all.BDmeans.sites <- soil.data.D03.all %>%
+  distinct(siteID, BD.site.mean) %>%
+  group_by(siteID) %>%
+  summarise(BD.site.mean = mean(BD.site.mean)) #had to do some coercive coding since unsure why distinct insisted on still grouping by plotID although not specified
+#Now, to avoid excessive NAs, we are going to sequentially join. First, add plot mean onto nitrogen dataframe, and then add on the site-level mean to ensure that doesn't have any NAs. From there, we can then gap fill into a new bulk density variable to be able to calculate the total inorganic nitrogen that would be estimated at the plot level for each sample, to then use all those estimate to produce the 'average' estimate at the plot and site level for lm() with carbon, since they will now be on the same scale (I think).
+D03.nitrogen.df.BDinfo <- left_join(D03.nitrogen.df, soil.data.D03.all.BDmeans.plots) #joining plot means
+D03.nitrogen.df.BDinfo <- left_join(D03.nitrogen.df.BDinfo, soil.data.D03.all.BDmeans.sites) #joining site means
+
+#GAP FILLING ---> Appears to have been successful joining, now let's gap fill to make that bulk density variable in the dataframe
+#Telling R to see if the bulk density of the plot mean is available, and if it is not, then apply the value from the site mean variable, or else just keep the NA in the plot mean in this new variable
+D03.nitrogen.df.BDinfo <- D03.nitrogen.df.BDinfo %>%
+  mutate(bulkdensity = if_else(is.na(BD.plot.mean), BD.site.mean, BD.plot.mean))
+
+sum(is.na(D03.nitrogen.df.BDinfo$bulkdensity)) #No NAs!
+
+#Given bulk density and the depth increment of each horizon in your dataframe, create a new column in your dataframe that is the total amount of soil in grams for a m^2 area
+#We used a m2 area, so use 100 cm x 100 cm  = 10,000 cm2 for the sample area in this case too.
+D03.nitrogen.df.draft <- D03.nitrogen.df.BDinfo %>%
+  mutate(sample.area.cm2 = 10000) %>%
+  mutate(sample.volume = sample.area.cm2*30) %>% #30 cm is the max depth for what is in the user guide... but like, we can maybe figure out actualy depth from other tables output by package that I do not have? 
+  mutate(g.soil = sample.volume*bulkdensity) %>% #should give units of g/m2  
+  mutate(InorganicN.ugm2 = g.soil*soilInorganicNugPerGram) %>% # g/m2 * ug / g = ug/m2 
+  mutate(InorganicN.ugHectare = InorganicN.ugm2 * (10000/1)) %>% # ug/m2 * m2/ha = ug/ha
+  mutate(InorganicN.gHectare = InorganicN.ugHectare * (1/1000000)) %>% #ug/ha * g/ug= g/ha
+  mutate(InorganicN.kgHectare = InorganicN.gHectare * (1/1000)) # g/ha * kg/g = kg/ha 
+write.csv(D03.nitrogen.df.draft, "D03.nitrogen.df.draft.csv") #writing it into a csv for safe keeping
+
+
+```
+
+
+##Exploratory Visualization for Inorganic Nitrogen variable post-carpentry
+```{r}
+# Initial visualization of data for Inorganic N
+D03.nitrogen.df.draft.Exploratory <- D03.nitrogen.df.draft %>%
+ group_by(siteID, plotID) %>%
+ summarise(InorganicN.kgHectare_average.plot = mean(InorganicN.kgHectare),
+           InorganicN.kgHectare_sd.plot = sd(InorganicN.kgHectare))
+
+exploratory.InorgN.D03 <- ggplot(data=D03.nitrogen.df.draft.Exploratory, aes(x=siteID, y=InorganicN.kgHectare_average.plot, group = siteID, color=siteID)) + 
+  geom_point(size=1.5, alpha = 0.3, position = position_jitterdodge(dodge.width = 0.5))  +
+        scale_color_brewer(name = "SiteID", palette = "Dark2") + #color-blind friendly
+        ggtitle("Average Soil Inorganic N per 1 Hectare by Site of D03") +
+       #scale_y_continuous(breaks = seq(0, 100, 10), limits = c(-15, 100)) +
+        ylab("Inorganic N (kg/hectare)") +
+        theme_classic(base_size = 16) +
+        theme(plot.title = element_text(size=16, hjust = 0.5),
+              axis.text.x=element_text(size=12, color = "black"),
+              axis.text.y=element_text(size=12),
+              axis.title.y=element_text(size=14), 
+              axis.title.x=element_blank(), 
+              legend.text=element_text(size=14),
+              legend.title=element_text(size=14),
+              legend.position = "none")
+exploratory.InorgN.D03
+```
+
+
+#Working Code, still need to add Nitrogen for D19--- Joining C and N dataframes for D03; Carpentry to join by domain
+```{r}
+
+#Domain split for tracking self
+# D03 = Anna
+# D02 = Andrea
+# D19 = Kylie
+# D08 = Trey
+
+# General Joining Approach -- Join carbon and nitrogen by domain initially; Then join these dataframes across domains. 
+## Timing of dataframes makes that approach challenging, so joining D03, D02 
+
+# D03 #######################################
+##(1) Adding in Domain ID for each dataframe
+D03.carbon.merged.df <- D03.carbon.merged.df %>%
+  mutate(domainID = "D03")
+
+D03.nitrogen.df.draft <- D03.nitrogen.df.draft %>%
+    mutate(domainID = "D03")
+  
+##(2) Selecting variables needed to streamline bulkiness of df
+D03.streamlined.carbon.df <- D03.carbon.merged.df %>%
+  select(domainID, siteID, plotID, AGB.C.Mg.ha, mean.root.MgC.ha, soil.C.Mg.ha, totalSampledAreaTrees, plot.AGB)
+
+D03.streamlined.nitrogen.df <- D03.nitrogen.df.draft %>%
+  select(domainID, siteID, plotID, sampleID, collectDate, InorganicN.kgHectare, soilAmmoniumNugPerGram, soilInorganicNugPerGram, netNminugPerGramPerDay, netNitugPerGramPerDay)
+
+##(3) Joining the streamlined carbon and nitrogen dataframes together for D02
+D03.fulljoin.CN.test.df <- full_join(D03.streamlined.carbon.df, D03.streamlined.nitrogen.df)
+## str(D03.fulljoin.CN.test.df) # 481 x 15
+
+
+#D02 #######################################
+## Read in the data
+D02.carbon.merged.df <- read.csv("D02.carbon.merged.csv")
+# str(D02.carbon.merged.df) #136 observations
+
+D02.nitrogen.merged.df <- read.csv("D02.nitrogen.df.draft.csv")
+# str(D02.nitrogen.merged.df)  #345 observations
+
+
+##(1) Adding in Domain ID
+D02.carbon.merged.df <- D02.carbon.merged.df %>%
+    mutate(domainID = "D02")
+
+D02.nitrogen.merged.df <- D02.nitrogen.merged.df %>%
+    mutate(domainID = "D02")
+
+##(2) Selecting variables needed to streamline bulkiness of df
+D02.streamlined.carbon.df <- D02.carbon.merged.df %>%
+  select(domainID, siteID, plotID, AGB.C.Mg.ha, mean.root.MgC.ha, soil.C.Mg.ha, totalSampledAreaTrees, plot.AGB)
+# str(D02.streamlined.carbon.df)
+
+D02.streamlined.nitrogen.df <- D02.nitrogen.merged.df %>%
+  select(domainID, siteID, plotID, sampleID, collectDate, InorganicN.kgHectare, soilAmmoniumNugPerGram, soilInorganicNugPerGram, netNminugPerGramPerDay, netNitugPerGramPerDay)
+# str(D02.streamlined.nitrogen.df)
+
+##(3) Joining the streamlined carbon and nitrogen dataframes together for D02
+D02.fulljoin.CN.test.df <- full_join(D02.streamlined.carbon.df, D02.streamlined.nitrogen.df)
+## str(D02.fulljoin.CN.test.df) # 481 x 15
+
+
+#D19 #######################################
+## Reading in the merged carbon data for D19
+D19.carbon.merged.df <- read.csv("D19.carbon.merged.csv")
+str(D19.carbon.merged.df)
+
+##(1) Adding in Domain ID
+D19.carbon.merged.df <- D19.carbon.merged.df %>%
+  mutate(domainID = "D19")
+
+#######insert nitrogen
+
+##(2) Selecting variables needed to streamline bulkiness of df
+D19.streamlined.carbon.df <- D19.carbon.merged.df %>%
+  select(domainID, siteID, plotID, AGB.C.Mg.ha, mean.root.MgC.ha, soil.C.Mg.ha, totalSampledAreaTrees, plot.AGB)
+# str(D19.streamlined.carbon.df) # 97 x 8
+
+#######insert nitrogen
+
+##(3) Joining the streamlined carbon and nitrogen dataframes together for D02
+###to do
+
+
+#D08 ##################################
+## Will need to merge carbon dataframe
+AGB.trees.by.plot.D08 <- read.csv("AGB.trees.by.plot.D08.csv")
+roots.by.plot.D08 <- read.csv("roots.by.plot.D08.csv")
+soil.by.plot.D08 <- read.csv("soil.by.plot.D08.csv")
+
+D08.carbon.merged.step1.df <- full_join(AGB.trees.by.plot.D08, roots.by.plot.D08, by=join_by(siteID, plotID)) 
+D08.carbon.merged.df <- full_join(D08.carbon.merged.step1.df, soil.by.plot.D08, by=join_by(siteID, plotID))
+# str(D08.carbon.merged.df) #131
+
+write.csv(D08.carbon.merged.df, "D08.carbon.merged.csv")
+
+## Reading in the merged carbon data for D08
+D08.carbon.merged.df <- read.csv("D08.carbon.merged.csv")
+# str(D08.carbon.merged.df) #131
+
+D08.nitrogen.merged.df <- read.csv("D08.nitrogen.df.draft.csv")
+# str(D08.nitrogen.merged.df)  #443 observations
+
+##(1) Adding in Domain ID
+D08.carbon.merged.df <- D08.carbon.merged.df %>%
+    mutate(domainID = "D08")
+
+D08.nitrogen.merged.df <- D08.nitrogen.merged.df %>%
+    mutate(domainID = "D08")
+
+##(2) Selecting variables needed to streamline bulkiness of df
+D08.streamlined.carbon.df <- D08.carbon.merged.df %>%
+  select(domainID, siteID, plotID, AGB.C.Mg.ha, mean.root.MgC.ha, soil.C.Mg.ha, totalSampledAreaTrees, plot.AGB)
+# str(D08.streamlined.carbon.df) #224
+
+D08.streamlined.nitrogen.df <- D08.nitrogen.merged.df %>%
+  select(domainID, siteID, plotID, sampleID, collectDate, InorganicN.kgHectare, soilAmmoniumNugPerGram, soilInorganicNugPerGram, netNminugPerGramPerDay, netNitugPerGramPerDay)
+# str(D08.streamlined.nitrogen.df) #443
+
+
+##(3) Joining the streamlined carbon and nitrogen dataframes together for D02
+D08.fulljoin.CN.test.df <- full_join(D08.streamlined.carbon.df, D08.streamlined.nitrogen.df) 
+#Note, initially had a many-to-many error, and seems like its coming from plotID not appropriately merging at the initial joins. Going back to check if specifying only plotID and siteID fix it, forcing it to ignore 'X' variable... Did that specification for lines 1500-1501. After inspecting, looks like that did the trick.
+
+str(D08.fulljoin.CN.test.df) # 554 x 15
+
+
+#Testing the join of D03, D02, D08 ##################################
+D02.D03.fulljoin.CN.test.df <- full_join(D02.fulljoin.CN.test.df, D03.fulljoin.CN.test.df)
+D02.D03.D08.fulljoin.CN.test.df <- full_join(D02.D03.fulljoin.CN.test.df, D08.fulljoin.CN.test.df)
+# str(D02.D03.D08.fulljoin.CN.test.df) #1479
+
+write.csv(D02.D03.D08.fulljoin.CN.test.df, "D02.D03.D08.fulljoin.CN.test.csv")
+
+
+D02.D03.D08.fulljoin.CN.test.df$year= substr(D02.D03.D08.fulljoin.CN.test.df$collectDate, 1,4)
+  
+
+```
+
+
+#Code Under Construction, model building -- using lme() in nlme package (main advantage is can utilize autocorrelation term)
+```{r}
+
+# Soil ##########################
+soil.model.test <- lme(InorganicN.kgHectare ~ soil.C.Mg.ha + domainID + soil.C.Mg.ha*domainID,
+                    random = ~1 | siteID/plotID,
+                    correlation = corAR1(), #currently left blank for now, it seems like it'll just go to default value, but looks like it may be good practice to specify the time variable and nesting structure here. Unsure if that would appropriately set autocorrelation related to the inorganic N
+                    data = D02.D03.D08.fulljoin.CN.test.df,
+                    na.action=na.exclude)
+summary(soil.model.test)
+# No significant main effect of soil carbon
+# Significant interaction between soil carbon and D03, when compared to D02 as the reference domain. Specifically, the effect of soil carbon on inorganic N is modified by +0.243 units compared to the reference domain
+
+# Tree ##########################
+tree.model.test <- lme(InorganicN.kgHectare ~ AGB.C.Mg.ha + domainID + AGB.C.Mg.ha*domainID,
+                    random = ~1 | siteID/plotID,
+                    correlation = corAR1(), #currently left blank for now, it seems like it'll just go to default value, but looks like it may be good practice to specify the time variable and nesting structure here. Unsure if that would appropriately set autocorrelation related to the inorganic N
+                    data = D02.D03.D08.fulljoin.CN.test.df,
+                    na.action=na.exclude)
+summary(tree.model.test)
+# No significant relationships
+
+# Roots ##########################
+roots.model.test <- lme(InorganicN.kgHectare ~ mean.root.MgC.ha + domainID + mean.root.MgC.ha*domainID,
+                    random = ~1 | siteID/plotID,
+                    correlation = corAR1(), #currently left blank for now, it seems like it'll just go to default value, but looks like it may be good practice to specify the time variable and nesting structure here. Unsure if that would appropriately set autocorrelation related to the inorganic N
+                    data = D02.D03.D08.fulljoin.CN.test.df,
+                    na.action=na.exclude)
+summary(roots.model.test)
+# Significant main effect of soil carbon
+# Significant main effect of D03 relative to D02; So when root carbon is held at 0, the inorganic N is 19.7 units lower in domain D03 than D02
+# Significant interaction between root carbon and D03
+# Significant interaction between root carbon and D08
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
