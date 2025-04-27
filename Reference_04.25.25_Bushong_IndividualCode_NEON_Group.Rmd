@@ -1630,7 +1630,7 @@ summary(roots.model.test)
 # Significant interaction between root carbon and D19
 
 ```
-
+ 
 #Code Under Construction, model visualization -- based on lme() in nlme package
 ```{R}
 ###### Preliminary model visualization, will likely need to split out due to y-axis by domain for appropriate resolution; Can also use min(, na.rm=TRUE) and max(, na.rm=TRUE) to identify the extreme variables skewing the axis
