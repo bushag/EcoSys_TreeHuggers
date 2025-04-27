@@ -3,17 +3,19 @@ title: "Bushong_Individual_Code_NEON_group_project"
 author: "AGB"
 date: "04.26.25 -- Merged from 04.14.25 Carbon RMD & 04.20.25 Nitrogen RMD on 04.25.2025"
 output:
-  word_document: 
-    number_sections: true
-  pdf_document: 
-    toc: true
-    number_sections: true
-    toc_depth: 4
   html_document: 
     toc: true
     toc_float: true
     toc_depth: 4
+  pdf_document: 
+    toc: true
+    number_sections: true
+    toc_depth: 4
+  word_document: 
+    number_sections: true
 ---
+
+#Note to self, the 'rename' to Reference_Bushong... is not sticking... unclear why
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
@@ -1121,13 +1123,13 @@ theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
 #Joining dataframes across D03 (Southeastern longleaf pine forests) for Soil Carbon Stocks
 ```{r}
 
-str(soil.data.sum.DSNY) #16 plots
-str(soil.data.sum.JERC) #23 plots
-str(soil.data.sum.OSBS) #23 plots
+# str(soil.data.sum.DSNY) #16 plots
+# str(soil.data.sum.JERC) #23 plots
+# str(soil.data.sum.OSBS) #23 plots
 
 soil.by.plot.D03 <- full_join(soil.data.sum.DSNY, soil.data.sum.JERC) #39 plots
 soil.by.plot.D03 <- full_join(soil.by.plot.D03, soil.data.sum.OSBS)
-str(soil.by.plot.D03) #62 plots, correctly joined!
+# str(soil.by.plot.D03) #62 plots, correctly joined!
 ```
 
 #Visualizing Soil Carbon Stocks by site of D03
@@ -1333,17 +1335,17 @@ exploratory.mineralization.D03 #note, getting a missing values warning
 ##Data carpentry for Inorganic Nitrogen (joining for D03 domain, bulk density plot/site means, gapfilling, upscaling of inorganic nitrogen variable to kg/ha)
 ```{r}
 D03.nitrogen.df <- read.csv("data.summary.D03_outputV2.csv")
-str(D03.nitrogen.df) #370 observations
-
-
-str(soil.data.DSNY) #70
-str(soil.data.JERC) #103
-str(soil.data.OSBS) #80
+# str(D03.nitrogen.df) #370 observations
+# 
+# 
+# str(soil.data.DSNY) #70
+# str(soil.data.JERC) #103
+# str(soil.data.OSBS) #80
 
 #Joining the soil data constructed above into a D03 domain dataframe
 soil.data.D03.join1 <- full_join(soil.data.DSNY, soil.data.JERC)
 soil.data.D03.all <- full_join(soil.data.D03.join1, soil.data.OSBS)
-str(soil.data.D03.all) #looks like it adds up at 253
+# str(soil.data.D03.all) #looks like it adds up at 253
 
 #Okay, I want to extract bulk density averaged at the plot level to join onto to nitrogen dataframe...
 soil.data.D03.all.BDmeans.plots <- soil.data.D03.all %>%
@@ -1568,7 +1570,7 @@ D08.streamlined.nitrogen.df <- D08.nitrogen.merged.df %>%
 D08.fulljoin.CN.test.df <- full_join(D08.streamlined.carbon.df, D08.streamlined.nitrogen.df) 
 #Note, initially had a many-to-many error, and seems like its coming from plotID not appropriately merging at the initial joins. Going back to check if specifying only plotID and siteID fix it, forcing it to ignore 'X' variable... Did that specification for lines 1500-1501. After inspecting, looks like that did the trick.
 
-str(D08.fulljoin.CN.test.df) # 554 x 15
+# str(D08.fulljoin.CN.test.df) # 554 x 15
 
 
 #Testing the join of D03, D02, D08 ##################################
@@ -1589,6 +1591,9 @@ write.csv(D02.D03.D08.D19.fulljoin.CN.test.df, "D02.D03.D08.D19.fulljoin.CN.test
 
 #Code Under Construction, model building -- using lme() in nlme package (main advantage is can utilize autocorrelation term)
 ```{r}
+#Ensuring variables are treated as factors
+D02.D03.D08.D19.fulljoin.CN.test.df$domainID <- as.factor(D02.D03.D08.D19.fulljoin.CN.test.df$domainID)
+D02.D03.D08.D19.fulljoin.CN.test.df$siteID <- as.factor(D02.D03.D08.D19.fulljoin.CN.test.df$siteID)
 
 # Soil ##########################
 soil.model.test <- lme(InorganicN.kgHectare ~ soil.C.Mg.ha + domainID + soil.C.Mg.ha*domainID,
@@ -1623,6 +1628,66 @@ summary(roots.model.test)
 # Significant interaction between root carbon and D03
 # Significant interaction between root carbon and D08
 # Significant interaction between root carbon and D19
+
+```
+
+#Code Under Construction, model visualization -- based on lme() in nlme package
+```{R}
+###### Preliminary model visualization, will likely need to split out due to y-axis by domain for appropriate resolution; Can also use min(, na.rm=TRUE) and max(, na.rm=TRUE) to identify the extreme variables skewing the axis
+
+#Learning that the predict function I was trying to use to extract the predicted values from the nlme model does not tolerate NAs, which from my understanding automatically get excluded when running the nlme model. So, needed to create a new subdataframe without NAs in the variables of our model in order to graph those predicted lines.
+
+
+# Soil ###########################
+#(1) Create subset dataframe without NAs in model variable for graphing purposes using predict
+soil_predict_df <- D02.D03.D08.D19.fulljoin.CN.test.df %>%
+  filter(!is.na(soil.C.Mg.ha), !is.na(InorganicN.kgHectare), !is.na(siteID))
+soil_predict_df$pred <- predict(soil.model.test, newdata = soil_predict_df, level=1)
+
+#(2) plot the raw data and the predicted values for the model
+soil_plot <- ggplot(D02.D03.D08.D19.fulljoin.CN.test.df, aes(x = soil.C.Mg.ha, y = InorganicN.kgHectare, colour = siteID)) +
+      facet_wrap(~domainID, nrow=2) +   # a panel for each mountain range
+      geom_point(alpha = 0.5) +
+      theme_classic() +
+     geom_line(data = soil_predict_df, aes(x = soil.C.Mg.ha, y = pred, group = siteID), linewidth = 1) + # adding predicted line from mixed model 
+     #scale_y_continuous(breaks = seq(0, 75, 25), limits = c(-10, 80)) +
+      theme(panel.spacing = unit(2, "lines"))  # adding space between panels
+soil_plot #note the warning message, pretty sure these are related to the intended empty rows via the NAs
+
+# Trees ###########################
+#(1) Create subset dataframe without NAs in model variable for graphing purposes using predict
+tree_predict_df <- D02.D03.D08.D19.fulljoin.CN.test.df %>%
+  filter(!is.na(AGB.C.Mg.ha), !is.na(InorganicN.kgHectare), !is.na(siteID))
+tree_predict_df$pred <- predict(tree.model.test, newdata = tree_predict_df, level=1)
+
+#(2) plot the raw data and the predicted values for the model
+tree_plot <- ggplot(D02.D03.D08.D19.fulljoin.CN.test.df, aes(x = AGB.C.Mg.ha, y = InorganicN.kgHectare, colour = siteID)) +
+      facet_wrap(~domainID, nrow=2) +   # a panel for each mountain range
+      geom_point(alpha = 0.5) +
+      theme_classic() +
+     geom_line(data = tree_predict_df, aes(x = AGB.C.Mg.ha, y = pred, group = siteID), linewidth = 1) + # adding predicted line from mixed model 
+     scale_y_continuous(breaks = seq(0, 75, 25), limits = c(-10, 80)) +
+      theme(panel.spacing = unit(2, "lines"))  # adding space between panels
+tree_plot #note the warning message, pretty sure these are related to the intended empty rows via the NAs
+
+
+
+# Roots ###########################
+#(1) Create subset dataframe without NAs in model variable for graphing purposes using predict
+root_predict_df <- D02.D03.D08.D19.fulljoin.CN.test.df %>%
+  filter(!is.na(mean.root.MgC.ha), !is.na(InorganicN.kgHectare), !is.na(siteID))
+root_predict_df$pred <- predict(roots.model.test, newdata = root_predict_df, level=1)
+
+#(2) plot the raw data and the predicted values for the model
+root_plot <- ggplot(D02.D03.D08.D19.fulljoin.CN.test.df, aes(x = mean.root.MgC.ha, y = InorganicN.kgHectare, colour = siteID)) +
+      facet_wrap(~domainID, nrow=2) +   # a panel for each mountain range
+      geom_point(alpha = 0.5) +
+      theme_classic() +
+    scale_y_continuous(breaks = seq(0, 75, 25), limits = c(-10, 80)) + #note, this does exclude one point from BLAN at 150, be mindful
+     geom_line(data = root_predict_df, aes(x = mean.root.MgC.ha, y = pred, group = siteID), linewidth = 1) + # adding predicted line from mixed model 
+    theme(panel.spacing = unit(2, "lines"))  # adding space between panels
+root_plot
+
 ```
 
 
