@@ -1707,15 +1707,51 @@ root_plot
 library(emmeans) #emmtrends in emmeans package automatically detects nlme structure and even the random effects
 
 #For models with interactions, we need to do pairwise comparisons to understand how the relationship between carbon stock and inorganic N stock varies by domain
-pairs(emtrends(soil.model.test, specs = "domainID", var = "soil.C.Mg.ha"))
 
-pairs(emtrends(tree.model.test, specs = "domainID", var = "AGB.C.Mg.ha"))
+#Soil
+soil.emtrends <- emtrends(soil.model.test, specs = "domainID", var = "soil.C.Mg.ha")
+pairs(soil.emtrends)
+soil.trends.df <- as.data.frame(soil.emtrends)
+soil.emtrends.plot <- ggplot(soil.trends.df, aes(x = domainID, y = soil.C.Mg.ha.trend)) +
+  geom_point(size = 3) +
+  geom_errorbar(aes(ymin = lower.CL, ymax = upper.CL), width = 0.2) +
+  labs(title = "Estimated Slope of Soil Carbon by Domain",
+    y = "Slope of Inorganic N ~ Soil Carbon Stock",
+    x = "Domain") +
+  theme_classic()
+soil.emtrends.plot
 
+#Tree
+tree.emtrends <- emtrends(tree.model.test, specs = "domainID", var = "AGB.C.Mg.ha")
+pairs(tree.emtrends)
+tree.trends.df <- as.data.frame(tree.emtrends)
+tree.emtrends.plot <- ggplot(tree.trends.df, aes(x = domainID, y = AGB.C.Mg.ha.trend)) +
+  geom_point(size = 3) +
+  geom_errorbar(aes(ymin = lower.CL, ymax = upper.CL), width = 0.2) +
+  labs(title = "Estimated Slope of Tree Carbon by Domain",
+    y = "Slope of Inorganic N ~ Tree Carbon Stock",
+    x = "Domain") +
+  theme_classic()
+tree.emtrends.plot
+
+#Roots
 pairs(emtrends(roots.model.test, specs = "domainID", var = "mean.root.MgC.ha")) 
     #double check how many sites are included for root carbon stock for D19...
     print.d19 <- D02.D03.D08.D19.fulljoin.CN.test.df %>%
       filter(domainID == "D19")
     unique(print.d19$siteID) #Why is OSBS a part of D19? Backtraced error up to import of roots.by.plot.D19. Original dataframe incorrect and had OSBS in it.
+    
+roots.emtrends <- emtrends(roots.model.test, specs = "domainID", var = "mean.root.MgC.ha")
+pairs(roots.emtrends)
+roots.trends.df <- as.data.frame(roots.emtrends)
+roots.emtrends.plot <- ggplot(roots.trends.df, aes(x = domainID, y = mean.root.MgC.ha.trend)) +
+  geom_point(size = 3) +
+  geom_errorbar(aes(ymin = lower.CL, ymax = upper.CL), width = 0.2) +
+  labs(title = "Estimated Slope of roots Carbon by Domain",
+    y = "Slope of Inorganic N ~ roots Carbon Stock",
+    x = "Domain") +
+  theme_classic()
+roots.emtrends.plot
 
 ```
 
