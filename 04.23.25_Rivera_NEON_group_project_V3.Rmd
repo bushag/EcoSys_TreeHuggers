@@ -1463,3 +1463,411 @@ D02.carbon.merged.df <- full_join(D02.carbon.merged.step1.df,soil.by.plot.D02)
 write.csv(D02.carbon.merged.df, "D02.carbon.merged.csv")
 ```
 
+#Modeling-------------------------------------------------------------------------
+####Not sure I'm doing this right/using the right code.####
+
+
+
+
+# Soil ##########################
+
+```{r}
+soil.model.test <- lme(InorganicN.kgHectare ~ soil.C.Mg.ha + domainID + soil.C.Mg.ha*domainID,
+                    random = ~1 | siteID/plotID,
+                    correlation = corAR1(), #currently left blank for now, it seems like it'll just go to default value, but looks like it may be good practice to specify the time variable and nesting structure here. Unsure if that would appropriately set autocorrelation related to the inorganic N
+                    data = D02_D03_D08_D19_fulljoin_CN_test,
+                    na.action=na.exclude)
+summary(soil.model.test)
+# No significant main effect of soil carbon
+# Significant interaction between soil carbon and D03, when compared to D02 as the reference domain. Specifically, the effect of soil carbon on inorganic N is modified by +0.243 units compared to the reference domain
+
+```
+
+
+# Tree ##########################
+
+```{r}
+tree.model.test <- lme(InorganicN.kgHectare ~ AGB.C.Mg.ha + domainID + AGB.C.Mg.ha*domainID,
+                    random = ~1 | siteID/plotID,
+                    correlation = corAR1(), #currently left blank for now, it seems like it'll just go to default value, but looks like it may be good practice to specify the time variable and nesting structure here. Unsure if that would appropriately set autocorrelation related to the inorganic N
+                    data = D02_D03_D08_D19_fulljoin_CN_test,
+                    na.action=na.exclude)
+summary(tree.model.test)
+# No significant main effect of soil carbon
+# Significant interaction between soil carbon and D19, when compared to D02 as the reference domain. Specifically, the effect of soil carbon on inorganic N is modified by +0.236 units compared to the reference domain
+```
+
+
+# Roots ##########################
+
+```{r}
+roots.model.test <- lme(InorganicN.kgHectare ~ mean.root.MgC.ha + domainID + mean.root.MgC.ha*domainID,
+                    random = ~1 | siteID/plotID,
+                    correlation = corAR1(), #currently left blank for now, it seems like it'll just go to default value, but looks like it may be good practice to specify the time variable and nesting structure here. Unsure if that would appropriately set autocorrelation related to the inorganic N
+                    data = D02_D03_D08_D19_fulljoin_CN_test,
+                    na.action=na.exclude)
+summary(roots.model.test)
+# Significant main effect of soil carbon
+# Significant main effect of D03 relative to D02
+# Significant main effect of D08 relative to D02
+# Significant interaction between root carbon and D03
+# Significant interaction between root carbon and D08
+# Significant interaction between root carbon and D19
+```
+
+
+#Undecided------------------------------------------------------------------------
+
+#Working Code, still need to add Nitrogen for D19--- Joining C and N dataframes for D03; Carpentry to join by domain
+```{r}
+
+#Domain split for tracking self
+# D03 = Anna
+# D02 = Andrea
+# D19 = Kylie
+# D08 = Trey
+
+# General Joining Approach -- Join carbon and nitrogen by domain initially; Then join these dataframes across domains. 
+
+# D03 #######################################
+##(1) Adding in Domain ID for each dataframe
+D03.carbon.merged.df <- D03.carbon.merged.df %>%
+  mutate(domainID = "D03")
+
+D03.nitrogen.df.draft <- D03.nitrogen.df.draft %>%
+    mutate(domainID = "D03")
+  
+##(2) Selecting variables needed to streamline bulkiness of df
+D03.streamlined.carbon.df <- D03.carbon.merged.df %>%
+  select(domainID, siteID, plotID, AGB.C.Mg.ha, mean.root.MgC.ha, soil.C.Mg.ha, totalSampledAreaTrees, plot.AGB)
+
+D03.streamlined.nitrogen.df <- D03.nitrogen.df.draft %>%
+  select(domainID, siteID, plotID, sampleID, collectDate, InorganicN.kgHectare, soilAmmoniumNugPerGram, soilInorganicNugPerGram, netNminugPerGramPerDay, netNitugPerGramPerDay)
+
+##(3) Joining the streamlined carbon and nitrogen dataframes together for D02
+D03.fulljoin.CN.test.df <- full_join(D03.streamlined.carbon.df, D03.streamlined.nitrogen.df)
+## str(D03.fulljoin.CN.test.df) # 481 x 15
+
+
+#D02 #######################################
+## Read in the data
+D02.carbon.merged.df <- read.csv("D02.carbon.merged.csv")
+# str(D02.carbon.merged.df) #136 observations
+
+D02.nitrogen.merged.df <- read.csv("D02.nitrogen.df.draft.csv")
+# str(D02.nitrogen.merged.df)  #345 observations
+
+
+##(1) Adding in Domain ID
+D02.carbon.merged.df <- D02.carbon.merged.df %>%
+    mutate(domainID = "D02")
+
+D02.nitrogen.merged.df <- D02.nitrogen.merged.df %>%
+    mutate(domainID = "D02")
+
+##(2) Selecting variables needed to streamline bulkiness of df
+D02.streamlined.carbon.df <- D02.carbon.merged.df %>%
+  select(domainID, siteID, plotID, AGB.C.Mg.ha, mean.root.MgC.ha, soil.C.Mg.ha, totalSampledAreaTrees, plot.AGB)
+# str(D02.streamlined.carbon.df)
+
+D02.streamlined.nitrogen.df <- D02.nitrogen.merged.df %>%
+  select(domainID, siteID, plotID, sampleID, collectDate, InorganicN.kgHectare, soilAmmoniumNugPerGram, soilInorganicNugPerGram, netNminugPerGramPerDay, netNitugPerGramPerDay)
+# str(D02.streamlined.nitrogen.df)
+
+##(3) Joining the streamlined carbon and nitrogen dataframes together for D02
+D02.fulljoin.CN.test.df <- full_join(D02.streamlined.carbon.df, D02.streamlined.nitrogen.df)
+## str(D02.fulljoin.CN.test.df) # 481 x 15
+
+
+#D19 #######################################
+
+# Commenting out this code when initially trying to address merging issues with original merged data, went back and reconstructed merged carbon dataframe #######
+
+# Reading in the merged carbon data for D19
+# D19.carbon.merged.df <- read.csv("D19.carbon.merged.csv")
+# # str(D19.carbon.merged.df)
+# 
+# ###Added Data carpentry to try to fix the many to many relationship
+# D19.carbon.merged.df$siteID.corrected = substr(D19.carbon.merged.df$plotID, 1,4) #issue with NAs being present for site ID propogating error in merging
+# D19.carbon.merged.df <- D19.carbon.merged.df %>%
+#   filter(siteID.corrected == "BONA" | siteID.corrected == "DEJU" | siteID.corrected == "HEAL") #Removing megapit values, check with Kylie and see if that makes sense
+# D19.carbon.merged.df <- D19.carbon.merged.df %>%
+#   select(-c(siteID)) #removing original siteID variable with NAs
+# D19.carbon.merged.df <- D19.carbon.merged.df %>% 
+#   rename(siteID = siteID.corrected) #renaming the corrected siteID column to just "siteID" for merging purposes
+
+# Reading in the merged nitrogen data for D19
+D19.nitrogen.merged.df <- read.csv("D19.nitrogen.df.draft.csv") #There are NAs in the plotID column making, seems like it is causing an issue to merge; Seems like they have siteID and a mean bulk density for the plot but not plotID... will remove for now to see if helps joining issue
+
+D19.nitrogen.merged.df <- D19.nitrogen.merged.df %>%
+  filter(!is.na(plotID)) #removing NAs in plotID
+# str(D19.nitrogen.merged.df)
+
+
+#Carbon dataframe -- Trying to fix merging issues
+AGB.trees.by.plot.D19 <- read.csv("AGB.trees.by.plot.D19.csv")
+roots.by.plot.D19 <- read.csv("roots.by.plot.D019.csv") ## Backtraced source of error for OSBS in D19... Not sure why/how that got in there, can fix on the back end because confirmed these sites for OSBS are accounted for in D03
+roots.by.plot.D19 <- roots.by.plot.D19 %>%
+  filter(siteID == "BONA" | siteID == "DEJU") #Note, there is no HEAL for D19 for roots.
+
+soil.by.plot.D19 <- read.csv("soil.by.plot.D19.csv")
+
+D19.carbon.merged.step1.df <- full_join(AGB.trees.by.plot.D19, roots.by.plot.D19, by=join_by(siteID, plotID)) 
+D19.carbon.merged.Anna.df <- full_join(D19.carbon.merged.step1.df, soil.by.plot.D19, by=join_by(siteID, plotID))
+# str(D08.carbon.merged.df) #131
+D19.carbon.merged.Anna.df <- D19.carbon.merged.Anna.df[-c(77, 78), ] #Removing megapit values, check with Kylie and see if that makes sense
+write.csv(D19.carbon.merged.Anna.df, "D19.carbon.merged.Anna.csv")
+
+
+##(1) Adding in Domain ID
+D19.carbon.merged.df <- D19.carbon.merged.Anna.df %>%
+  mutate(domainID = "D19")
+
+D19.nitrogen.merged.df <- D19.nitrogen.merged.df %>%
+  mutate(domainID = "D19")
+
+
+##(2) Selecting variables needed to streamline bulkiness of df
+D19.streamlined.carbon.df <- D19.carbon.merged.df %>%
+  select(domainID, siteID, plotID, AGB.C.Mg.ha, mean.root.MgC.ha, soil.C.Mg.ha, totalSampledAreaTrees, plot.AGB)
+ # str(D19.streamlined.carbon.df) # 95 x 8
+
+D19.streamlined.nitrogen.df <- D19.nitrogen.merged.df %>%
+  select(domainID, siteID, plotID, sampleID, collectDate, InorganicN.kgHectare, soilAmmoniumNugPerGram, soilInorganicNugPerGram, netNminugPerGramPerDay, netNitugPerGramPerDay)
+# str(D19.streamlined.nitrogen.df)
+
+##(3) Joining the streamlined carbon and nitrogen dataframes together for D02
+D19.fulljoin.CN.test.df <- full_join(D19.streamlined.carbon.df, D19.streamlined.nitrogen.df) #getting a many-to-many relationship warning; iteratively going, seems like the many-to-many is related to DEJU_045.... Went ahead and remerged carbon dataframe as that seemed to be the source of the issue; Doing so seemed to fix the warning and visual inspection looks correct
+
+
+#D08 ##################################
+## Will need to merge carbon dataframe
+AGB.trees.by.plot.D08 <- read.csv("AGB.trees.by.plot.D08.csv")
+roots.by.plot.D08 <- read.csv("roots.by.plot.D08.csv")
+soil.by.plot.D08 <- read.csv("soil.by.plot.D08.csv")
+
+D08.carbon.merged.step1.df <- full_join(AGB.trees.by.plot.D08, roots.by.plot.D08, by=join_by(siteID, plotID)) 
+D08.carbon.merged.df <- full_join(D08.carbon.merged.step1.df, soil.by.plot.D08, by=join_by(siteID, plotID))
+# str(D08.carbon.merged.df) #131
+
+write.csv(D08.carbon.merged.df, "D08.carbon.merged.csv")
+
+## Reading in the merged carbon data for D08
+D08.carbon.merged.df <- read.csv("D08.carbon.merged.csv")
+# str(D08.carbon.merged.df) #131
+
+D08.nitrogen.merged.df <- read.csv("D08.nitrogen.df.draft.csv")
+# str(D08.nitrogen.merged.df)  #443 observations
+
+##(1) Adding in Domain ID
+D08.carbon.merged.df <- D08.carbon.merged.df %>%
+    mutate(domainID = "D08")
+
+D08.nitrogen.merged.df <- D08.nitrogen.merged.df %>%
+    mutate(domainID = "D08")
+
+##(2) Selecting variables needed to streamline bulkiness of df
+D08.streamlined.carbon.df <- D08.carbon.merged.df %>%
+  select(domainID, siteID, plotID, AGB.C.Mg.ha, mean.root.MgC.ha, soil.C.Mg.ha, totalSampledAreaTrees, plot.AGB)
+# str(D08.streamlined.carbon.df) #224
+
+D08.streamlined.nitrogen.df <- D08.nitrogen.merged.df %>%
+  select(domainID, siteID, plotID, sampleID, collectDate, InorganicN.kgHectare, soilAmmoniumNugPerGram, soilInorganicNugPerGram, netNminugPerGramPerDay, netNitugPerGramPerDay)
+# str(D08.streamlined.nitrogen.df) #443
+
+
+##(3) Joining the streamlined carbon and nitrogen dataframes together for D02
+D08.fulljoin.CN.test.df <- full_join(D08.streamlined.carbon.df, D08.streamlined.nitrogen.df) 
+#Note, initially had a many-to-many error, and seems like its coming from plotID not appropriately merging at the initial joins. Going back to check if specifying only plotID and siteID fix it, forcing it to ignore 'X' variable... Did that specification for lines 1500-1501. After inspecting, looks like that did the trick.
+
+# str(D08.fulljoin.CN.test.df) # 554 x 15
+
+
+#Testing the join of D03, D02, D08 ##################################
+D02.D03.fulljoin.CN.test.df <- full_join(D02.fulljoin.CN.test.df, D03.fulljoin.CN.test.df)
+D02.D03.D08.fulljoin.CN.test.df <- full_join(D02.D03.fulljoin.CN.test.df, D08.fulljoin.CN.test.df)
+D02.D03.D08.D19.fulljoin.CN.test.df <- full_join(D02.D03.D08.fulljoin.CN.test.df, D19.fulljoin.CN.test.df)
+# str(D02.D03.D08.D19.fulljoin.CN.test.df) #1763
+
+write.csv(D02.D03.D08.D19.fulljoin.CN.test.df, "D02.D03.D08.D19.fulljoin.CN.test.csv")
+
+
+# Initial created for autocorrelation field, doesn't seem to be needed though so commented out
+# D02.D03.D08.fulljoin.CN.test.df$year= substr(D02.D03.D08.fulljoin.CN.test.df$collectDate, 1,4)
+  
+
+
+D02.D03.D08.D19.fulljoin.CN.test.df %>%
+  select(domainID, siteID) %>%
+  distinct() %>%  # ensure uniqueness
+  count(domainID, name = "n_sites") %>%
+  arrange(desc(n_sites))  # I do not know why D19 has four sites... When did OSBS get in there?
+
+```
+
+
+#Code Under Construction, model building -- using lme() in nlme package (main advantage is can utilize autocorrelation term)
+```{r}
+#Ensuring variables are treated as factors
+D02_D03_D08_D19_fulljoin_CN_test$domainID <- as.factor(D02_D03_D08_D19_fulljoin_CN_test$domainID)
+D02_D03_D08_D19_fulljoin_CN_test$siteID <- as.factor(D02_D03_D08_D19_fulljoin_CN_test$siteID)
+
+# Soil ##########################
+soil.model.test <- lme(InorganicN.kgHectare ~ soil.C.Mg.ha + domainID + soil.C.Mg.ha*domainID,
+                    random = ~1 | siteID/plotID,
+                    correlation = corAR1(), #currently left blank for now, it seems like it'll just go to default value, but looks like it may be good practice to specify the time variable and nesting structure here. Unsure if that would appropriately set autocorrelation related to the inorganic N
+                    data = D02_D03_D08_D19_fulljoin_CN_test,
+                    na.action=na.exclude)
+summary(soil.model.test)
+# No significant main effect of soil carbon
+# Significant interaction between soil carbon and D03, when compared to D02 as the reference domain. Specifically, the effect of soil carbon on inorganic N is modified by +0.243 units compared to the reference domain
+
+# Tree ##########################
+tree.model.test <- lme(InorganicN.kgHectare ~ AGB.C.Mg.ha + domainID + AGB.C.Mg.ha*domainID,
+                    random = ~1 | siteID/plotID,
+                    correlation = corAR1(), #currently left blank for now, it seems like it'll just go to default value, but looks like it may be good practice to specify the time variable and nesting structure here. Unsure if that would appropriately set autocorrelation related to the inorganic N
+                    data = D02_D03_D08_D19_fulljoin_CN_test,
+                    na.action=na.exclude)
+summary(tree.model.test)
+# No significant main effect of soil carbon
+# Significant interaction between soil carbon and D19, when compared to D02 as the reference domain. Specifically, the effect of soil carbon on inorganic N is modified by +0.236 units compared to the reference domain
+
+# Roots ##########################
+roots.model.test <- lme(InorganicN.kgHectare ~ mean.root.MgC.ha + domainID + mean.root.MgC.ha*domainID,
+                    random = ~1 | siteID/plotID,
+                    correlation = corAR1(), #currently left blank for now, it seems like it'll just go to default value, but looks like it may be good practice to specify the time variable and nesting structure here. Unsure if that would appropriately set autocorrelation related to the inorganic N
+                    data = D02_D03_D08_D19_fulljoin_CN_test,
+                    na.action=na.exclude)
+summary(roots.model.test)
+# Significant main effect of soil carbon
+# Significant main effect of D03 relative to D02
+# Significant main effect of D08 relative to D02
+# Significant interaction between root carbon and D03
+# Significant interaction between root carbon and D08
+# Significant interaction between root carbon and D19
+
+```
+ 
+#Code Under Construction, model visualization -- based on lme() in nlme package
+```{R}
+###### Preliminary model visualization, will likely need to split out due to y-axis by domain for appropriate resolution; Can also use min(, na.rm=TRUE) and max(, na.rm=TRUE) to identify the extreme variables skewing the axis
+
+#Learning that the predict function I was trying to use to extract the predicted values from the nlme model does not tolerate NAs, which from my understanding automatically get excluded when running the nlme model. So, needed to create a new subdataframe without NAs in the variables of our model in order to graph those predicted lines.
+
+
+# Soil ###########################
+#(1) Create subset dataframe without NAs in model variable for graphing purposes using predict
+soil_predict_df <- D02_D03_D08_D19_fulljoin_CN_test %>%
+  filter(!is.na(soil.C.Mg.ha), !is.na(InorganicN.kgHectare), !is.na(siteID))
+soil_predict_df$pred <- predict(soil.model.test, newdata = soil_predict_df, level=1)
+
+#(2) plot the raw data and the predicted values for the model
+soil_plot <- ggplot(D02_D03_D08_D19_fulljoin_CN_test, aes(x = soil.C.Mg.ha, y = InorganicN.kgHectare, colour = siteID)) +
+      facet_wrap(~domainID, nrow=2) +   # a panel for each mountain range
+      geom_point(alpha = 0.5) +
+      theme_classic() +
+     geom_line(data = soil_predict_df, aes(x = soil.C.Mg.ha, y = pred, group = siteID), linewidth = 1) + # adding predicted line from mixed model 
+     #scale_y_continuous(breaks = seq(0, 75, 25), limits = c(-10, 80)) +
+      theme(panel.spacing = unit(2, "lines"))  # adding space between panels
+soil_plot #note the warning message, pretty sure these are related to the intended empty rows via the NAs
+
+# Trees ###########################
+#(1) Create subset dataframe without NAs in model variable for graphing purposes using predict
+tree_predict_df <- D02_D03_D08_D19_fulljoin_CN_test %>%
+  filter(!is.na(AGB.C.Mg.ha), !is.na(InorganicN.kgHectare), !is.na(siteID))
+tree_predict_df$pred <- predict(tree.model.test, newdata = tree_predict_df, level=1)
+
+#(2) plot the raw data and the predicted values for the model
+tree_plot <- ggplot(D02_D03_D08_D19_fulljoin_CN_test, aes(x = AGB.C.Mg.ha, y = InorganicN.kgHectare, colour = siteID)) +
+      facet_wrap(~domainID, nrow=2) +   # a panel for each mountain range
+      geom_point(alpha = 0.5) +
+      theme_classic() +
+     geom_line(data = tree_predict_df, aes(x = AGB.C.Mg.ha, y = pred, group = siteID), linewidth = 1) + # adding predicted line from mixed model 
+     scale_y_continuous(breaks = seq(0, 75, 25), limits = c(-10, 80)) +
+      theme(panel.spacing = unit(2, "lines"))  # adding space between panels
+tree_plot #note the warning message, pretty sure these are related to the intended empty rows via the NAs
+
+
+
+# Roots ###########################
+#(1) Create subset dataframe without NAs in model variable for graphing purposes using predict
+root_predict_df <- D02_D03_D08_D19_fulljoin_CN_test %>%
+  filter(!is.na(mean.root.MgC.ha), !is.na(InorganicN.kgHectare), !is.na(siteID))
+root_predict_df$pred <- predict(roots.model.test, newdata = root_predict_df, level=1)
+
+#(2) plot the raw data and the predicted values for the model
+root_plot <- ggplot(D02_D03_D08_D19_fulljoin_CN_test, aes(x = mean.root.MgC.ha, y = InorganicN.kgHectare, colour = siteID)) +
+      facet_wrap(~domainID, nrow=2) +   # a panel for each mountain range
+      geom_point(alpha = 0.5) +
+      theme_classic() +
+    scale_y_continuous(breaks = seq(0, 75, 25), limits = c(-10, 80)) + #note, this does exclude one point from BLAN at 150, be mindful
+     geom_line(data = root_predict_df, aes(x = mean.root.MgC.ha, y = pred, group = siteID), linewidth = 1) + # adding predicted line from mixed model 
+    theme(panel.spacing = unit(2, "lines"))  # adding space between panels
+root_plot
+
+```
+
+
+
+# Post-hoc using emmtrends
+```{r}
+library(emmeans) #emmtrends in emmeans package automatically detects nlme structure and even the random effects
+
+#For models with interactions, we need to do pairwise comparisons to understand how the relationship between carbon stock and inorganic N stock varies by domain
+
+#Soil
+soil.emtrends <- emtrends(soil.model.test, specs = "domainID", var = "soil.C.Mg.ha")
+pairs(soil.emtrends)
+soil.trends.df <- as.data.frame(soil.emtrends)
+soil.emtrends.plot <- ggplot(soil.trends.df, aes(x = domainID, y = soil.C.Mg.ha.trend)) +
+  geom_point(size = 3) +
+  geom_errorbar(aes(ymin = lower.CL, ymax = upper.CL), width = 0.2) +
+  labs(title = "Estimated Slope of Soil Carbon by Domain",
+    y = "Slope of Inorganic N ~ Soil Carbon Stock",
+    x = "Domain") +
+  theme_classic()
+soil.emtrends.plot
+
+#Tree
+tree.emtrends <- emtrends(tree.model.test, specs = "domainID", var = "AGB.C.Mg.ha")
+pairs(tree.emtrends)
+tree.trends.df <- as.data.frame(tree.emtrends)
+tree.emtrends.plot <- ggplot(tree.trends.df, aes(x = domainID, y = AGB.C.Mg.ha.trend)) +
+  geom_point(size = 3) +
+  geom_errorbar(aes(ymin = lower.CL, ymax = upper.CL), width = 0.2) +
+  labs(title = "Estimated Slope of Tree Carbon by Domain",
+    y = "Slope of Inorganic N ~ Tree Carbon Stock",
+    x = "Domain") +
+  theme_classic()
+tree.emtrends.plot
+
+#Roots
+pairs(emtrends(roots.model.test, specs = "domainID", var = "mean.root.MgC.ha")) 
+    #double check how many sites are included for root carbon stock for D19...
+    print.d19 <- D02_D03_D08_D19_fulljoin_CN_test %>%
+      filter(domainID == "D19")
+    unique(print.d19$siteID) #Why is OSBS a part of D19? Backtraced error up to import of roots.by.plot.D19. Original dataframe incorrect and had OSBS in it.
+    
+roots.emtrends <- emtrends(roots.model.test, specs = "domainID", var = "mean.root.MgC.ha")
+pairs(roots.emtrends)
+roots.trends.df <- as.data.frame(roots.emtrends)
+roots.emtrends.plot <- ggplot(roots.trends.df, aes(x = domainID, y = mean.root.MgC.ha.trend)) +
+  geom_point(size = 3) +
+  geom_errorbar(aes(ymin = lower.CL, ymax = upper.CL), width = 0.2) +
+  labs(title = "Estimated Slope of roots Carbon by Domain",
+    y = "Slope of Inorganic N ~ roots Carbon Stock",
+    x = "Domain") +
+  theme_classic()
+roots.emtrends.plot
+
+```
+
+
+
+
+
+
+
+
+
+
