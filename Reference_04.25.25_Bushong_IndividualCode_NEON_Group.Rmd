@@ -694,7 +694,7 @@ theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
 
 ```
 
-#Joining dataframes across D03 (Southeastern longleaf pine forests) for Tree Carbon Stocks
+#Joining dataframes across D03 (Southeastern longleaf pine forests) for Roots Carbon Stocks
 ```{r}
 
 # str(roots.by.plot.DSNY) #30 plots
@@ -1499,14 +1499,17 @@ D19.nitrogen.merged.df <- D19.nitrogen.merged.df %>%
 
 #Carbon dataframe -- Trying to fix merging issues
 AGB.trees.by.plot.D19 <- read.csv("AGB.trees.by.plot.D19.csv")
-roots.by.plot.D19 <- read.csv("roots.by.plot.D019.csv")
+roots.by.plot.D19 <- read.csv("roots.by.plot.D019.csv") ## Backtraced source of error for OSBS in D19... Not sure why/how that got in there, can fix on the back end because confirmed these sites for OSBS are accounted for in D03
+roots.by.plot.D19 <- roots.by.plot.D19 %>%
+  filter(siteID == "BONA" | siteID == "DEJU") #Note, there is no HEAL for D19 for roots.
+
 soil.by.plot.D19 <- read.csv("soil.by.plot.D19.csv")
 
 D19.carbon.merged.step1.df <- full_join(AGB.trees.by.plot.D19, roots.by.plot.D19, by=join_by(siteID, plotID)) 
 D19.carbon.merged.Anna.df <- full_join(D19.carbon.merged.step1.df, soil.by.plot.D19, by=join_by(siteID, plotID))
 # str(D08.carbon.merged.df) #131
 D19.carbon.merged.Anna.df <- D19.carbon.merged.Anna.df[-c(77, 78), ] #Removing megapit values, check with Kylie and see if that makes sense
-write.csv(D19.carbon.merged.Anna.df, "D08.carbon.merged.Anna.csv")
+write.csv(D19.carbon.merged.Anna.df, "D19.carbon.merged.Anna.csv")
 
 
 ##(1) Adding in Domain ID
@@ -1585,6 +1588,13 @@ write.csv(D02.D03.D08.D19.fulljoin.CN.test.df, "D02.D03.D08.D19.fulljoin.CN.test
 # Initial created for autocorrelation field, doesn't seem to be needed though so commented out
 # D02.D03.D08.fulljoin.CN.test.df$year= substr(D02.D03.D08.fulljoin.CN.test.df$collectDate, 1,4)
   
+
+
+D02.D03.D08.D19.fulljoin.CN.test.df %>%
+  select(domainID, siteID) %>%
+  distinct() %>%  # ensure uniqueness
+  count(domainID, name = "n_sites") %>%
+  arrange(desc(n_sites))  # I do not know why D19 has four sites... When did OSBS get in there?
 
 ```
 
@@ -1692,12 +1702,22 @@ root_plot
 
 
 
+# Post-hoc using emmtrends
+```{r}
+library(emmeans) #emmtrends in emmeans package automatically detects nlme structure and even the random effects
 
+#For models with interactions, we need to do pairwise comparisons to understand how the relationship between carbon stock and inorganic N stock varies by domain
+pairs(emtrends(soil.model.test, specs = "domainID", var = "soil.C.Mg.ha"))
 
+pairs(emtrends(tree.model.test, specs = "domainID", var = "AGB.C.Mg.ha"))
 
+pairs(emtrends(roots.model.test, specs = "domainID", var = "mean.root.MgC.ha")) 
+    #double check how many sites are included for root carbon stock for D19...
+    print.d19 <- D02.D03.D08.D19.fulljoin.CN.test.df %>%
+      filter(domainID == "D19")
+    unique(print.d19$siteID) #Why is OSBS a part of D19? Backtraced error up to import of roots.by.plot.D19. Original dataframe incorrect and had OSBS in it.
 
-
-
+```
 
 
 
